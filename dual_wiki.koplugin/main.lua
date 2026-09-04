@@ -36,6 +36,8 @@ local MOEGIRL_BASE = "https://zh.moegirl.org.cn/api.php"
 local LF = string.char(10)
 
 -- Helper to make fast HTTP GET request
+-- (capped at 2MB: a 512MB e-ink device cannot afford unbounded remote bodies)
+local MAX_RESPONSE_BYTES = 2 * 1024 * 1024
 local function httpGet(url, timeout)
     socketutil:set_timeout(timeout or 6, 12)
     local sink = {}
@@ -52,6 +54,9 @@ local function httpGet(url, timeout)
     socketutil:reset_timeout()
     local content = table.concat(sink)
     if code and code >= 200 and code < 300 and content and #content > 0 then
+        if #content > MAX_RESPONSE_BYTES then
+            return false, "Response too large"
+        end
         return true, content
     end
     return false, status or code or "Network error"
@@ -201,6 +206,12 @@ function DualWiki:lookup(word, engine, word_boxes, lang)
     UIManager:show(progress_info)
 
     UIManager:scheduleIn(0.05, function()
+        -- Guard: the ReaderUI / FileManager may have been torn down (book
+        -- switched / closed) while the request was pending; bail out instead
+        -- of showing result windows on a dead UI instance.
+        if not self.ui or not self.ui.dialog then
+            return
+        end
         local ok, title_res, def_res = pcall(function()
             if is_wiki then
                 return self:fetchWikipedia(word, lang)
