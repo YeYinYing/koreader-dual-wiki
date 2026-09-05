@@ -2,22 +2,23 @@
 
 All notable changes to this project will be documented in this file.
 
-## [1.1.0] - 2026-09-05
+## [1.2.0] - 2026-09-05
 
-### Added — Fuzzy-Tolerant Retrieval Architecture (Plan A)
+### Added — Phase 2.1 Globalization & Multi-Engine Matrix
 
-- **Single-merged-request candidate pipeline**: one `generator=prefixsearch + prop=extracts` round-trip returns up to 4 ranked candidates, each with a readable intro summary. No second handshake on the happy path (8/10 official matrix cases resolve in exactly one HTTP round-trip even on 2.4GHz Kindle Wi-Fi).
-- **Local query sanitation (0 ms)**: strips only outermost CJK wrapper brackets (`《》 “ ” 【】（）`…), zero-width noise and stray whitespace. In-word punctuation is never touched — `Re:从零开始的异世界生活`, `Fate/stay night`, `拿破仑·波拿巴` and `(G)I-DLE` pass through intact.
-- **Graceful degradation ladder**: exact prefixsearch → trailing-particle drop (`量子力学的` → `量子力学`) → top-candidate content acceptance (server-side redirect targets such as `拿破仑·波拿巴` → `拿破仑一世`) → full-text `generator=search` fallback (resolves dab-page tops like `三体` → `三体 (小说)`) → en.wikipedia retry for pure-Latin zh queries → retry dialog.
-- **On-demand full-article upgrade**: confirming an already-listed candidate word via the pencil icon upgrades the summary window to the uncapped full extract in one direct request (long-press pencil prefills the currently viewed candidate).
-- **Traditional/Simplified alignment**: server-side `converttitles=1` on zh.wikipedia — no local conversion dictionary; variant redirects (`三体`→`三體`) resolve through the server.
-- **Native multi-candidate switching**: candidates render as multiple DictQuickLookup results with the built-in left/right switcher — no custom UI, zero added memory.
+- **Language-aware retrieval**: zh / ja / en trailing-particle tables now route per query language. Chinese keeps the original 12 particles; Japanese adds `の/に/を/は/が/で/と/へ/も/な/よ/ね`; English only strips possessive `’s / 's` and deliberately never strips plural `s`.
+- **Latin word-boundary good-hit logic**: `quantum` now matches `Quantum mechanics`; `jedi` matches `Jedi`; short prefixes without a word boundary are rejected, so `wo` does not hijack `Wookieepedia`.
+- **Context-aware engine registry**: KOReader book metadata `doc_props.language` now drives the visible highlight buttons and menu entries for Wikipedia (ZH/EN/JA), Moegirlpedia and Fandom.
+- **Fandom adapter**: verified Fandom wikis do not support `prop=extracts`; full-article paths use `action=parse` with HTML stripping, while candidate selection still uses title search/prefix search.
+- **gettext i18n**: bundled `messages.pot`, `zh_CN.po`, `zh_TW.po`, `ja.po` and compiled `.mo` files are loaded at startup when the active KOReader UI language is available.
+- **Cross-language synergy**: Japanese moegirl misses now fall back to `ja.wikipedia` instead of returning unrelated moegirl redirect targets.
 
 ### Fixed
 
-- Prefix-search hits were previously only reachable through a two-step search-then-fetch flow; exact-title misses (少选一字/多划标点) failed into the retry dialog instead of self-healing.
+- Stage-4 content acceptance is now guarded by a prefix-relation check, preventing moegirl's kana-index quirk from accepting unrelated redirects.
+- The English retrieval path no longer strips plural `s`, avoiding regressions such as `physics` → `physic`.
 
-## [1.0.0] - 2026-09-05
+## [1.1.0] - 2026-09-05
 
 ### Added
 - **Moegirlpedia Engine**: Ultra-fast plain-text online queries via the MediaWiki Action API, with zero thumbnail downloads (`explaintext=1`, no `pageimages`).

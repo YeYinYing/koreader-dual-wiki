@@ -1,27 +1,34 @@
 --[[--
-Dual-Engine Encyclopedia (Moegirlpedia + Wikipedia) Plugin for KOReader.
+Dual-Engine Encyclopedia (Moegirlpedia + Wikipedia + Fandom) Plugin for KOReader.
 
-v1.1.0 — Fuzzy-Tolerant Retrieval Architecture (Plan A):
+v1.2.0 — Phase 2.1 Globalization (Cross-Language Co-adaptation):
 
-1. Local query sanitation (0ms): strips outer CJK/ASCII wrapper brackets
-   (《》“”【】（） etc.) and zero-width noise, never touching in-word
-   punctuation (Re:…, Fate/stay night, 拿破仑·波拿巴 stay intact).
-2. Single-round-trip candidate pipeline: one merged MediaWiki request
-   (generator=prefixsearch + prop=extracts, intro mode) returns up to 4
-   ranked candidates *with readable summaries* — no second handshake on
-   the happy path, even on 2.4GHz Kindle Wi-Fi.
-3. Graceful degradation ladder: prefix(q) → prefix(q minus one trailing
-   particle) → generator=search full-text fallback → retry dialog.
-4. On-demand full article: confirm the same word via the pencil icon to
-   upgrade the summary to the uncapped full extract (single request).
-5. Traditional/Simplified Chinese alignment via server-side
-   converttitles=1 (no local conversion tables).
+1. Engine registry: wikipedia ({lang}.wikipedia.org), moegirl
+   (zh.moegirl.org.cn), fandom ({sub}.fandom.com) — all MediaWiki-native.
+2. Language-aware retrieval (Plan A generalization):
+   - Trailing-particle tables per language: zh (12), ja (の/に/を/は/が/
+     で/と/へ/も/な…), en ('s/’s — plural-s deliberately excluded).
+   - hasGoodHit adapts: CJK keeps the ≤2-char prefix rule; Latin uses
+     case-insensitive exact / word-boundary prefix (quantum →
+     Quantum mechanics), fixing the Plan A Latin defect.
+   - converttitles=1 strictly isolated to wikipedia+zh.
+3. Context-aware book language detection (doc:getProps().language →
+   zh/en/ja) drives dynamic highlight-button sets:
+   zh book: [Moegirlpedia] [Wikipedia (ZH)]
+   en book: [Wikipedia (EN)] [Fandom]
+   ja book: [ウィキペディア (JA)] [Moegirlpedia]
+   FM menu offers explicit language choices.
+4. Fandom adapter: Fandom wikis do NOT ship TextExtracts (API returns
+   "Unrecognized value for parameter prop: extracts"); candidate titles via
+   generator=prefixsearch, full article on-demand via action=parse
+   (2MB-capped, HTML stripped on display).
+5. gettext i18n: all user-facing strings wrapped in _(); bundled
+   locale/*.po/*.mo loaded at init for the active UI language.
 
-Enables seamless online search and definition lookup of:
+Enables seamless online search and definition lookup across:
 1. ACG / Anime terms from Moegirlpedia (zh.moegirl.org.cn)
-2. General knowledge, science, and history from Wikipedia (zh/ja/en.wikipedia.org)
-using native KOReader UI widgets, book-grade formatting, sub-second
-plain-text queries, and zero-hang offline handling.
+2. General knowledge from Wikipedia (zh/ja/en.wikipedia.org)
+3. Pop-culture from Fandom communities (starwars, genshin-impact, ...)
 --]]--
 
 local DictQuickLookup = require("ui/widget/dictquicklookup")
@@ -39,14 +46,15 @@ local socket_url = require("socket.url")
 local util = require("util")
 local logger = require("logger")
 local _ = require("gettext")
+local GetText = require("gettext")
 
 local DualWiki = WidgetContainer:extend{
     name = "dual_wiki",
     is_doc_only = false,
 }
 
--- API endpoints
-local MOEGIRL_BASE = "https://zh.moegirl.org.cn/api.php"
+-- Plugin directory (for locale loading), derived from this module's path.
+local PLUGIN_DIR = (debug.getinfo(1, "S").source or ""):match("^@?(.*)/[^/]*$") or ""
 
 -- Safe linefeed character constant
 local LF = string.char(10)
@@ -109,24 +117,6 @@ local function utf8Chop(s, which)
     end
 end
 
--- A "good hit" is an exact match, or a title that is only slightly longer
--- than the query while sharing its full prefix (小笠原道 → 小笠原道大).
--- Long prefix-noise titles (量子力学的 → 量子力学的数学基础) do NOT qualify,
--- so the pipeline keeps degrading to the particle-stripped query.
-local function hasGoodHit(cands, q)
-    if not cands then return false end
-    local q_len = utf8Len(q)
-    for _, c in ipairs(cands) do
-        if c.title == q then
-            return true
-        end
-        if q_len >= 2 and c.title:sub(1, #q) == q and utf8Len(c.title) - q_len <= 2 then
-            return true
-        end
-    end
-    return false
-end
-
 -- Zero-width noise: U+200B/200C/200D (UTF-8: E2 80 8B/8C/8D) and U+FEFF (EF BB BF)
 local ZERO_WIDTH = { "\226\128\139", "\226\128\140", "\226\128\141", "\239\187\191" }
 
@@ -167,19 +157,102 @@ local function sanitizeQuery(raw)
     return q
 end
 
--- Stage-2 sanitation: drop ONE trailing Chinese particle (的地得了着过等中下里上),
+-- Stage-2 sanitation (协同改进项 1): language-aware trailing-particle drop,
 -- only as a fallback after the exact query missed. Byte-exact comparison (no
 -- Lua byte-class patterns) prevents false hits inside other CJK characters.
-local TRAILING_PARTICLES = { "的", "地", "得", "了", "着", "过", "等", "中", "下", "里", "上", "之" }
-local function stripTrailingParticle(q)
+-- English plural-s is deliberately absent: "physics" → "physic" would be a
+-- regression; only the possessive 's is a safe particle.
+local PARTICLES = {
+    zh = { "的", "地", "得", "了", "着", "过", "等", "中", "下", "里", "上", "之" },
+    ja = { "の", "に", "を", "は", "が", "で", "と", "へ", "も", "な", "よ", "ね" },
+    en = { "'s", "’s" },
+}
+local function stripTrailingParticle(q, lang)
+    local list = PARTICLES[lang] or PARTICLES.zh
     if q == "" or utf8Len(q) <= 2 then return q end
-    local tail = utf8Last(q)
-    for _, p in ipairs(TRAILING_PARTICLES) do
-        if tail == p then
-            return q:sub(1, #q - #p)
+    for _, p in ipairs(list) do
+        if q:sub(-#p) == p then
+            local stripped = q:sub(1, #q - #p)
+            if utf8Len(stripped) >= 2 then
+                return stripped
+            end
         end
     end
     return q
+end
+
+-- Latin script languages get the word-boundary good-hit rule (协同改进项 2).
+local LATIN_LANGS = { en = true, de = true, fr = true, es = true, ru = true, it = true, pt = true }
+
+-- A "good hit" is an exact match, or:
+--   CJK: a title sharing the query's full prefix and ≤2 chars longer
+--        (小笠原道 → 小笠原道大); long prefix-noise (量子力学的数学基础)
+--        does NOT qualify, so the pipeline keeps degrading.
+--   Latin: case-insensitive exact or word-boundary prefix
+--        (quantum → Quantum mechanics; jedi → Jedi; wookieepedia is not
+--        matched by "wookie" — next char must be space/end).
+local function hasGoodHit(cands, q, lang)
+    if not cands then return false end
+    if LATIN_LANGS[lang] then
+        local ql = q:lower()
+        for _, c in ipairs(cands) do
+            local tl = c.title:lower()
+            if tl == ql then
+                return true
+            end
+            if tl:sub(1, #ql) == ql then
+                local nxt = c.title:sub(#q + 1, #q + 1)
+                if nxt == "" or nxt == " " then
+                    return true
+                end
+            end
+        end
+        return false
+    end
+    local q_len = utf8Len(q)
+    for _, c in ipairs(cands) do
+        if c.title == q then
+            return true
+        end
+        if q_len >= 2 and c.title:sub(1, #q) == q and utf8Len(c.title) - q_len <= 2 then
+            return true
+        end
+    end
+    return false
+end
+
+-- Prefix-relation guard for content acceptance (Stage 4/5): only accept a
+-- top candidate that demonstrably relates to the query — CJK: ≥2 shared
+-- leading characters (拿破仑一世 ↔ 拿破仑·波拿巴); Latin: the query's first
+-- word appears at the title's start (word length ≥3). Rejects moegirl's
+-- kana-index quirk where シャナ surfaces the unrelated "Shanna".
+local function sharesPrefix(title, q, lang)
+    if not title or not q or title == "" or q == "" then return false end
+    if LATIN_LANGS[lang] then
+        local first_word = title:lower():match("^([%a']+)")
+        if not first_word or #first_word < 3 then return false end
+        return q:lower():sub(1, #first_word) == first_word
+    end
+    local n, i = 0, 1
+    while i <= #title and i <= #q do
+        local bt, bq = title:byte(i), q:byte(i)
+        if bt ~= bq then break end
+        local w = bt < 0x80 and 1 or (bt < 0xE0 and 2 or (bt < 0xF0 and 3 or 4))
+        if title:sub(i, i + w - 1) ~= q:sub(i, i + w - 1) then break end
+        n = n + 1
+        i = i + w
+    end
+    return n >= 2
+end
+
+local function sharesPrefixAny(cands, q, lang)
+    if not cands then return false end
+    for _, c in ipairs(cands) do
+        if sharesPrefix(c.title, q, lang) then
+            return true
+        end
+    end
+    return false
 end
 
 -- Rank merged-request candidates. Server index order (already
@@ -210,25 +283,64 @@ local function parseCandidatePages(data, query)
     return #cands > 0 and cands or nil
 end
 
--- A "good hit" is an exact match, or a title that is only slightly longer
--- than the query while sharing its full prefix (小笠原道 → 小笠原道大).
--- Long prefix-noise titles (量子力学的 → 量子力学的数学基础) do NOT qualify,
--- so the pipeline keeps degrading to the particle-stripped query.
-local function hasGoodHit(cands, q)
-    if not cands then return false end
-    local q_len = utf8Len(q)
-    for _, c in ipairs(cands) do
-        if c.title == q then
-            return true
-        end
-        if q_len >= 2 and c.title:sub(1, #q) == q and utf8Len(c.title) - q_len <= 2 then
-            return true
-        end
-    end
-    return false
+-- Normalize a doc-props language field ("zh-CN", "en_US", "eng", "ja"…) to a
+-- plugin language key (zh/en/ja), defaulting to zh.
+local LANG_MAP = {
+    zh = "zh", zho = "zh", chi = "zh", cn = "zh",
+    en = "en", eng = "en",
+    ja = "ja", jpn = "ja", jp = "ja",
+}
+local function normalizeLang(raw)
+    if not raw then return "zh" end
+    local base = raw:lower():match("^([a-z]+)")
+    return LANG_MAP[base] or "zh"
 end
 
 -- [[ query-helpers:end ]]
+
+-- Engine registry (多百科矩阵): MediaWiki-native endpoints with per-engine
+-- URL/label/variant/particle policies. converttitles=1 is STRICTLY isolated
+-- to wikipedia+zh (协同改进项 3).
+local ENGINES = {
+    wikipedia = {
+        api = function(lang)
+            return string.format("https://%s.wikipedia.org/w/api.php", lang or "zh")
+        end,
+        label = function(lang)
+            local l = lang or "zh"
+            if l == "ja" then return _("Wikipedia (JA)") end
+            if l == "en" then return _("Wikipedia (EN)") end
+            return _("Wikipedia (ZH)")
+        end,
+        needsConverttitles = function(lang) return (lang or "zh") == "zh" end,
+        particleLang = function(lang) return lang or "zh" end,
+        switchTarget = function() return "moegirl" end,
+    },
+    moegirl = {
+        api = function()
+            return "https://zh.moegirl.org.cn/api.php"
+        end,
+        label = function()
+            return _("Moegirlpedia")
+        end,
+        needsConverttitles = function() return false end,
+        -- zh.moegirl serves Japanese terms too (シャナ etc.); particles follow
+        -- the query/book language rather than the site language.
+        particleLang = function(lang) return lang or "zh" end,
+        switchTarget = function() return "wikipedia" end,
+    },
+    fandom = {
+        api = function(sub)
+            return string.format("https://%s.fandom.com/api.php", sub or "starwars")
+        end,
+        label = function(sub)
+            return string.format(_("Fandom (%s)"), sub or "starwars")
+        end,
+        needsConverttitles = function() return false end,
+        particleLang = function() return "en" end,
+        switchTarget = function() return "wikipedia" end,
+    },
+}
 
 -- Helper to make fast HTTP GET request
 local function httpGet(url, timeout)
@@ -261,7 +373,7 @@ local function cleanWikiExtract(text)
     -- Format sub-sections as ▸ sub-heading, and main sections as 【main heading】
     text = text:gsub("===+ *(.-) *===+", LF .. LF .. "▸ %1" .. LF)
     text = text:gsub("== *(.-) *==", LF .. LF .. "【%1】" .. LF)
-    -- Strip any residual HTML tags if any leaked through
+    -- Strip any residual HTML tags if any leaked through (Fandom action=parse)
     text = text:gsub("<[^>]+>", "")
     -- Normalize multiple newlines
     text = text:gsub(LF .. LF .. LF .. "+", LF .. LF)
@@ -272,18 +384,74 @@ end
 
 -- Unified MediaWiki API URL builder (both engines are MediaWiki-native)
 local function buildApiURL(engine, lang, params)
-    if engine == "moegirl" then
-        return MOEGIRL_BASE .. "?action=query" .. params
+    local cfg = ENGINES[engine]
+    if not cfg then return nil end
+    return cfg.api(lang) .. "?action=query" .. params
+end
+
+-- 强制语言锁定：非空时覆盖书籍语种探测（上下文感知调度的用户 override）。
+function DualWiki:_bookLang()
+    local locked = G_reader_settings and G_reader_settings:readSetting("dualwiki_lang")
+    if locked and (locked == "zh" or locked == "en" or locked == "ja") then
+        return locked
     end
-    return string.format("https://%s.wikipedia.org/w/api.php?action=query", lang or "zh") .. params
+    local doc = self.ui and self.ui.document
+    if doc and doc.getProps then
+        local ok, props = pcall(doc.getProps, doc)
+        if ok and props and props.language then
+            return normalizeLang(props.language)
+        end
+    end
+    return "zh"
+end
+
+function DualWiki:_defaultFandomSub()
+    if G_reader_settings then
+        local sub = G_reader_settings:readSetting("dualwiki_fandom_community")
+        if sub and sub ~= "" then return sub end
+    end
+    return "starwars"
 end
 
 function DualWiki:init()
+    self:_loadPluginLocale()
     if self.ui and self.ui.highlight then
         self:_registerHighlightButtons()
     end
     if self.ui and self.ui.menu then
         self.ui.menu:registerToMainMenu(self)
+    end
+end
+
+-- Load this plugin's .mo for the active KOReader UI language (gettext merge).
+-- Normalizes common KOReader codes (zh_CN / zh-Hant / ja / ja_JP…) to the
+-- bundled locale directory names.
+function DualWiki:_loadPluginLocale()
+    if not G_reader_settings then return end
+    local lang = G_reader_settings:readSetting("language")
+    if not lang or lang == "" then return end
+    if lang:match("^en") or lang:match("^C") then return end
+    lang = lang:gsub("%.utf8$", ""):gsub("%.UTF%-8$", "")
+    local base, script = lang:match("^([a-zA-Z]+)[_%-]([a-zA-Z]+)$")
+    local dir
+    if base then
+        base = base:lower()
+        if base == "zh" then
+            local s = script:lower()
+            dir = (s == "tw" or s == "hant" or s == "hk") and "zh_TW" or "zh_CN"
+        else
+            dir = base
+        end
+    elseif lang:lower() == "zh" then
+        dir = "zh_CN"
+    else
+        dir = lang:lower()
+    end
+    local mo = PLUGIN_DIR .. "locale/" .. dir .. "/LC_MESSAGES/dual_wiki.mo"
+    local f = io.open(mo, "r")
+    if f then
+        f:close()
+        GetText:loadMO(mo)
     end
 end
 
@@ -299,37 +467,92 @@ function DualWiki:_registerHighlightButtons()
         highlight._highlight_buttons["05_wikipedia"] = nil
     end
 
-    -- 1. Register Moegirlpedia (ACG, Anime, Gaming, Subcultures)
+    -- 1. Moegirlpedia (ACG / Anime / Gaming / Subcultures) — zh & ja books
     highlight:addToHighlightDialog("05_a_dualwiki_moegirl", function(hl)
         return {
-            text = "萌娘百科",
+            text = _("Moegirlpedia"),
             show_in_highlight_dialog_func = function()
-                return hl.selected_text ~= nil
+                local lang = self:_bookLang()
+                return hl.selected_text ~= nil and (lang == "zh" or lang == "ja")
             end,
             callback = function()
                 local word = util.cleanupSelectedText(hl.selected_text.text)
                 if not word or word == "" then return end
                 local word_boxes = hl:getHighlightVisibleBoxes() or (hl.selected_text.sboxes or hl.selected_text.pboxes)
                 UIManager:scheduleIn(0.1, function()
-                    self:lookup(word, "moegirl", word_boxes)
+                    self:lookup(word, "moegirl", word_boxes, self:_bookLang())
                 end)
             end,
         }
     end)
 
-    -- 2. Register Modern Wikipedia (General Knowledge, Science, History)
-    highlight:addToHighlightDialog("05_b_dualwiki_wikipedia", function(hl)
+    -- 2. Wikipedia (ZH) — zh books
+    highlight:addToHighlightDialog("05_b_dualwiki_wikipedia_zh", function(hl)
         return {
-            text = "维基百科",
+            text = _("Wikipedia (ZH)"),
             show_in_highlight_dialog_func = function()
-                return hl.selected_text ~= nil
+                return hl.selected_text ~= nil and self:_bookLang() == "zh"
             end,
             callback = function()
                 local word = util.cleanupSelectedText(hl.selected_text.text)
                 if not word or word == "" then return end
                 local word_boxes = hl:getHighlightVisibleBoxes() or (hl.selected_text.sboxes or hl.selected_text.pboxes)
                 UIManager:scheduleIn(0.1, function()
-                    self:lookup(word, "wikipedia", word_boxes)
+                    self:lookup(word, "wikipedia", word_boxes, "zh")
+                end)
+            end,
+        }
+    end)
+
+    -- 3. Wikipedia (EN) — en books
+    highlight:addToHighlightDialog("05_c_dualwiki_wikipedia_en", function(hl)
+        return {
+            text = _("Wikipedia (EN)"),
+            show_in_highlight_dialog_func = function()
+                return hl.selected_text ~= nil and self:_bookLang() == "en"
+            end,
+            callback = function()
+                local word = util.cleanupSelectedText(hl.selected_text.text)
+                if not word or word == "" then return end
+                local word_boxes = hl:getHighlightVisibleBoxes() or (hl.selected_text.sboxes or hl.selected_text.pboxes)
+                UIManager:scheduleIn(0.1, function()
+                    self:lookup(word, "wikipedia", word_boxes, "en")
+                end)
+            end,
+        }
+    end)
+
+    -- 4. Fandom (Pop-culture) — en books
+    highlight:addToHighlightDialog("05_d_dualwiki_fandom", function(hl)
+        return {
+            text = _("Fandom"),
+            show_in_highlight_dialog_func = function()
+                return hl.selected_text ~= nil and self:_bookLang() == "en"
+            end,
+            callback = function()
+                local word = util.cleanupSelectedText(hl.selected_text.text)
+                if not word or word == "" then return end
+                local word_boxes = hl:getHighlightVisibleBoxes() or (hl.selected_text.sboxes or hl.selected_text.pboxes)
+                UIManager:scheduleIn(0.1, function()
+                    self:lookup(word, "fandom", word_boxes, self:_defaultFandomSub())
+                end)
+            end,
+        }
+    end)
+
+    -- 5. Wikipedia (JA) — ja books
+    highlight:addToHighlightDialog("05_e_dualwiki_wikipedia_ja", function(hl)
+        return {
+            text = _("Wikipedia (JA)"),
+            show_in_highlight_dialog_func = function()
+                return hl.selected_text ~= nil and self:_bookLang() == "ja"
+            end,
+            callback = function()
+                local word = util.cleanupSelectedText(hl.selected_text.text)
+                if not word or word == "" then return end
+                local word_boxes = hl:getHighlightVisibleBoxes() or (hl.selected_text.sboxes or hl.selected_text.pboxes)
+                UIManager:scheduleIn(0.1, function()
+                    self:lookup(word, "wikipedia", word_boxes, "ja")
                 end)
             end,
         }
@@ -338,24 +561,46 @@ end
 
 function DualWiki:addToMainMenu(menu_items)
     menu_items.dualwiki_moegirl = {
-        text = "萌娘百科查询",
+        text = _("Moegirlpedia lookup"),
         sorting_hint = "search",
         callback = function()
-            self:showSearchDialog("moegirl")
+            self:showSearchDialog("moegirl", nil, nil, "zh")
         end,
     }
-    menu_items.dualwiki_wikipedia = {
-        text = "维基百科查询",
+    menu_items.dualwiki_wikipedia_zh = {
+        text = _("Wikipedia lookup (Chinese)"),
         sorting_hint = "search",
         callback = function()
-            self:showSearchDialog("wikipedia")
+            self:showSearchDialog("wikipedia", nil, nil, "zh")
+        end,
+    }
+    menu_items.dualwiki_wikipedia_en = {
+        text = _("Wikipedia lookup (English)"),
+        sorting_hint = "search",
+        callback = function()
+            self:showSearchDialog("wikipedia", nil, nil, "en")
+        end,
+    }
+    menu_items.dualwiki_wikipedia_ja = {
+        text = _("Wikipedia lookup (Japanese)"),
+        sorting_hint = "search",
+        callback = function()
+            self:showSearchDialog("wikipedia", nil, nil, "ja")
+        end,
+    }
+    menu_items.dualwiki_fandom = {
+        text = _("Fandom lookup"),
+        sorting_hint = "search",
+        callback = function()
+            self:showSearchDialog("fandom", nil, nil, self:_defaultFandomSub())
         end,
     }
 end
 
 function DualWiki:showSearchDialog(engine, initial_query, word_boxes, lang)
-    local is_wiki = (engine == "wikipedia")
-    local title = is_wiki and "维基百科词条查询" or "萌娘百科词条查询"
+    local cfg = ENGINES[engine]
+    if not cfg then return end
+    local title = _("Article lookup") .. " · " .. cfg.label(lang)
     local input_dialog
     input_dialog = InputDialog:new{
         title = title,
@@ -364,14 +609,14 @@ function DualWiki:showSearchDialog(engine, initial_query, word_boxes, lang)
         buttons = {
             {
                 {
-                    text = "取消",
+                    text = _("Cancel"),
                     id = "close",
                     callback = function()
                         UIManager:close(input_dialog)
                     end,
                 },
                 {
-                    text = "查询",
+                    text = _("Search"),
                     is_enter_default = true,
                     callback = function()
                         local query = input_dialog:getInputText()
@@ -399,6 +644,7 @@ end
 -- Merged probe request: one HTTP round-trip returns up to MAX_CANDIDATES
 -- ranked candidates, each with a readable intro summary (exintro mode keeps
 -- exlimit unclamped; full-text mode is server-clamped to 1 page).
+-- Fandom lacks TextExtracts, so candidates there are title-only.
 -- mode: "prefix" (generator=prefixsearch) or "search" (generator=search).
 function DualWiki:fetchCandidates(q, engine, lang, mode)
     local esc_q = socket_url.escape(q)
@@ -411,7 +657,7 @@ function DualWiki:fetchCandidates(q, engine, lang, mode)
     params = params
         .. "&prop=extracts&explaintext=1&exintro=1&exlimit=" .. MAX_CANDIDATES
         .. "&redirects=1&format=json&formatversion=2"
-    if engine == "wikipedia" and (lang or "zh") == "zh" then
+    if ENGINES[engine] and ENGINES[engine].needsConverttitles(lang) then
         params = params .. "&converttitles=1"
     end
 
@@ -434,7 +680,7 @@ function DualWiki:fetchDirect(word, engine, lang)
     if q == "" then q = word end
     local params = "&prop=extracts&explaintext=1&redirects=1&titles="
         .. socket_url.escape(q) .. "&format=json&formatversion=2"
-    if engine == "wikipedia" and (lang or "zh") == "zh" then
+    if ENGINES[engine] and ENGINES[engine].needsConverttitles(lang) then
         params = params .. "&converttitles=1"
     end
 
@@ -456,27 +702,52 @@ function DualWiki:fetchDirect(word, engine, lang)
     return nil
 end
 
+-- Fandom full-article adapter: Fandom wikis ship no TextExtracts, so use
+-- action=parse (HTML). 2MB cap + tag-strip on display keep it safe.
+function DualWiki:fetchFandomArticle(word, sub)
+    local q = sanitizeQuery(word)
+    if q == "" then q = word end
+    local url = ENGINES.fandom.api(sub)
+        .. "?action=parse&page=" .. socket_url.escape(q)
+        .. "&prop=text&disablepp=1&format=json&formatversion=2"
+    local ok, body = httpGet(url, DIRECT_TIMEOUT)
+    if not ok or not body then
+        return nil
+    end
+    local ok_json, data = pcall(JSON.decode, body)
+    if not ok_json or type(data) ~= "table" or not data.parse or type(data.parse.text) ~= "string" then
+        return nil
+    end
+    local text = data.parse.text
+    if #text == 0 then return nil end
+    return { { title = q, extract = text, index = 1 } }
+end
+
 -- Degradation ladder (each step is a single merged request):
 --   1. prefixsearch(sanitized query)
---   2. prefixsearch(query minus ONE trailing particle)
---   3. generator=search full-text fallback
---   4. en.wikipedia retry for pure-Latin queries on zh
+--   2. prefixsearch(query minus ONE trailing particle, language-aware)
+--   3. en.wikipedia retry for pure-Latin queries on zh
+--   4. top candidate carries real content (server-side redirect targets)
+--   5. generator=search full-text fallback
+--   6. surface whatever prefix noise we had
 function DualWiki:queryPipeline(word, engine, lang)
     local q0 = sanitizeQuery(word)
     if q0 == "" then q0 = word end
-    local q2 = stripTrailingParticle(q0)
+    local plang = ENGINES[engine] and ENGINES[engine].particleLang(lang) or "zh"
+    local q2 = stripTrailingParticle(q0, plang)
 
     -- Stage 1: merged prefixsearch probe (up to 4 ranked candidates).
     local r1 = self:fetchCandidates(q0, engine, lang, "prefix")
-    if hasGoodHit(r1, q0) then
+    if hasGoodHit(r1, q0, plang) then
         return r1, false
     end
 
-    -- Stage 2: trailing-particle drop retry (量子力学的 → 量子力学).
+    -- Stage 2: trailing-particle drop retry (量子力学的 → 量子力学,
+    -- シャナの → シャナ, Oppenheimer's → Oppenheimer).
     local r2 = nil
     if q2 ~= q0 and utf8Len(q2) >= 2 then
         r2 = self:fetchCandidates(q2, engine, lang, "prefix")
-        if hasGoodHit(r2, q2) then
+        if hasGoodHit(r2, q2, plang) then
             return r2, false
         end
     end
@@ -486,21 +757,34 @@ function DualWiki:queryPipeline(word, engine, lang)
         return self:queryPipeline(word, engine, "en")
     end
 
-    -- Stage 4: the top candidate carries real content even without a crisp
-    -- prefix match (server-side redirect targets: (G)I-DLE → I-dle,
-    -- 拿破仑·波拿巴 → 拿破仑一世). Accept it and stop.
-    if r1 and r1[1] and #(r1[1].extract or "") >= 60 then
+    -- Stage 4: the top candidate carries real content AND relates to the
+    -- query (server-side redirect targets: 拿破仑·波拿巴 → 拿破仑一世,
+    -- 涼宮ハルヒの憂鬱 → 涼宮ハルヒの憂鬱 (アニメ)). The prefix-relation
+    -- guard rejects moegirl's kana quirk (シャナの → Shanna).
+    if r1 and r1[1] and #(r1[1].extract or "") >= 60
+        and sharesPrefix(r1[1].title, q0, plang) then
         return r1, false
     end
 
     -- Stage 5: full-text search fallback (catches dab-page tops like
     -- 三体 → 三體 with no content, where search resolves 三体 (小说)).
     local s = self:fetchCandidates(q0, engine, lang, "search")
-    if s and #s > 0 then
+    if s and #s > 0 and sharesPrefixAny(s, q2 ~= q0 and q2 or q0, plang) then
         return s, false
     end
 
-    -- Stage 6: surface whatever prefix noise we had (better than nothing).
+    -- Stage 6 (cross-engine synergy): a Japanese book query that zero-hits on
+    -- the zh-only moegirl site falls back to ja.wikipedia — kana terms like
+    -- シャナ resolve there (灼眼のシャナ), while moegirl's index points シャナ
+    -- at an unrelated "Shanna".
+    if engine == "moegirl" and lang == "ja" then
+        local fallback = self:queryPipeline(word, "wikipedia", "ja")
+        if fallback and #fallback > 0 then
+            return fallback, false
+        end
+    end
+
+    -- Stage 7: surface whatever prefix noise we had (better than nothing).
     if r1 and #r1 > 0 then
         return r1, false
     end
@@ -513,6 +797,8 @@ end
 
 function DualWiki:lookup(word, engine, word_boxes, lang, want_full)
     if not word or word == "" then return end
+    local cfg = ENGINES[engine]
+    if not cfg then return end
 
     if NetworkMgr:willRerunWhenOnline(function()
         self:lookup(word, engine, word_boxes, lang, want_full)
@@ -520,10 +806,8 @@ function DualWiki:lookup(word, engine, word_boxes, lang, want_full)
         return
     end
 
-    local is_wiki = (engine == "wikipedia")
-    lang = lang or "zh"
-    local prompt_title = is_wiki and string.format("正在快速查询维基百科 (%s):" .. LF .. "%s", lang:upper(), word)
-                                 or ("正在快速查询萌娘百科:" .. LF .. word)
+    local prompt_title = string.format("%s · %s", _("Querying"), cfg.label(lang))
+        .. LF .. word
 
     local progress_info = InfoMessage:new{
         text = prompt_title,
@@ -540,6 +824,9 @@ function DualWiki:lookup(word, engine, word_boxes, lang, want_full)
         end
         local ok, cands, is_full = pcall(function()
             if want_full then
+                if engine == "fandom" then
+                    return self:fetchFandomArticle(word, lang or self:_defaultFandomSub()), true
+                end
                 return self:fetchDirect(word, engine, lang), true
             end
             local result, full_flag = self:queryPipeline(word, engine, lang)
@@ -558,8 +845,12 @@ end
 
 function DualWiki:showResult(word, cands, engine, word_boxes, lang, is_full)
     local self_ref = self
-    local is_moegirl = (engine == "moegirl")
-    local dict_name = is_moegirl and "萌娘百科" or string.format("维基百科 (%s)", (lang or "ZH"):upper())
+    local cfg = ENGINES[engine]
+    if not cfg then return end
+    local dict_name = cfg.label(lang)
+    -- DictQuickLookup consumes `lang` per result for font shaping; Fandom's
+    -- community subdomain is not a language code, so map it to en.
+    local result_lang = (engine == "fandom") and "en" or (lang or "zh")
 
     self._last_candidate_titles = {}
     self._last_was_full = is_full and true or false
@@ -571,13 +862,13 @@ function DualWiki:showResult(word, cands, engine, word_boxes, lang, is_full)
         if cand.extract and #cand.extract > 0 then
             definition = cleanWikiExtract(cand.extract)
         else
-            definition = "（前缀候选：暂无内容摘要。长按右上角铅笔图标可编辑并载入本词条完整正文。）"
+            definition = _("Candidate match: press and hold the pencil icon to load the full article.")
         end
         results[i] = {
             word = cand.title,
             definition = definition,
             dictionary = dict_name,
-            lang = lang or "zh",
+            lang = result_lang,
             rtl_lang = false,
         }
     end
@@ -610,19 +901,23 @@ function DualWiki:showResult(word, cands, engine, word_boxes, lang, is_full)
 end
 
 function DualWiki:showRetryDialog(failed_word, engine, word_boxes, lang)
-    local is_wiki = (engine == "wikipedia")
-    local title = is_wiki and "维基百科未找到，可修改微调重试：" or "萌娘百科未找到，可修改微调重试："
-    local switch_btn_text = is_wiki and "换查【萌娘百科】" or "换查【维基百科】"
+    local cfg = ENGINES[engine]
+    if not cfg then return end
+    local target = cfg.switchTarget and cfg.switchTarget()
+    local target_cfg = target and ENGINES[target]
+    local switch_btn_text = target_cfg and string.format("%s → %s", _("Switch to"), target_cfg.label(
+        target == "wikipedia" and (lang == "ja" and "ja" or lang == "en" and "en" or "zh") or "zh"
+    )) or _("Retry")
 
     local retry_dialog
     retry_dialog = InputDialog:new{
-        title = title,
+        title = string.format("%s · %s", cfg.label(lang), _("Not found, modify and retry:")),
         input = failed_word,
         input_type = "text",
         buttons = {
             {
                 {
-                    text = "取消",
+                    text = _("Cancel"),
                     id = "close",
                     callback = function()
                         UIManager:close(retry_dialog)
@@ -634,16 +929,13 @@ function DualWiki:showRetryDialog(failed_word, engine, word_boxes, lang)
                         local query = retry_dialog:getInputText()
                         UIManager:close(retry_dialog)
                         if query and query ~= "" then
-                            if is_wiki then
-                                self:lookup(query, "moegirl", word_boxes)
-                            else
-                                self:lookup(query, "wikipedia", word_boxes)
-                            end
+                            self:lookup(query, target or "wikipedia", word_boxes,
+                                target == "wikipedia" and lang or "zh")
                         end
                     end,
                 },
                 {
-                    text = "重新查询",
+                    text = _("Retry"),
                     is_enter_default = true,
                     callback = function()
                         local query = retry_dialog:getInputText()

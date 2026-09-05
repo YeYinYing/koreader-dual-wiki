@@ -1,0 +1,61 @@
+msgid ""
+msgstr ""
+"Content-Type: text/plain; charset=UTF-8\nPlural-Forms: nplurals=1; plural=0;\n"
+
+msgid "Wikipedia (JA)"
+msgstr "维基百科 (日文)"
+
+msgid "Wikipedia (EN)"
+msgstr "维基百科 (英文)"
+
+msgid "Wikipedia (ZH)"
+msgstr "维基百科 (中文)"
+
+msgid "Moegirlpedia"
+msgstr "萌娘百科"
+
+msgid "Fandom (%s)"
+msgstr "Fandom (%s)"
+
+msgid "Fandom"
+msgstr "Fandom"
+
+msgid "Moegirlpedia lookup"
+msgstr "萌娘百科查询"
+
+msgid "Wikipedia lookup (Chinese)"
+msgstr "维基百科查询（中文）"
+
+msgid "Wikipedia lookup (English)"
+msgstr "维基百科查询（英文）"
+
+msgid "Wikipedia lookup (Japanese)"
+msgstr "维基百科查询（日文）"
+
+msgid "Fandom lookup"
+msgstr "Fandom 查询"
+
+msgid "Article lookup"
+msgstr "词条查询"
+
+msgid "Cancel"
+msgstr "取消"
+
+msgid "Search"
+msgstr "查询"
+
+msgid "Candidate match: press and hold the pencil icon to load the full article."
+msgstr "（候选词条：长按右上角铅笔图标可载入本词条完整正文。）"
+
+msgid "Querying"
+msgstr "正在查询"
+
+msgid "Not found, modify and retry:"
+msgstr "未找到，可修改微调重试："
+
+msgid "Retry"
+msgstr "重新查询"
+
+msgid "Switch to"
+msgstr "换查"
+

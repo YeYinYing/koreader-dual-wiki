@@ -10,9 +10,9 @@
 
 </div>
 
-**Dual Wiki** is a zero-delay, dual-engine online encyclopedia lookup plugin for **KOReader** e-ink readers (Kindle, Kobo, Onyx Boox, Android).
+**Dual Wiki** is a zero-delay, multi-engine encyclopedia lookup plugin for **KOReader** e-ink readers (Kindle, Kobo, Onyx Boox, Android).
 
-It integrates **Moegirlpedia** — the wiki dedicated to anime, manga, gaming lore and internet culture — alongside a modernized, plain-text-streaming **Wikipedia** engine.
+It integrates **Moegirlpedia** — the wiki dedicated to anime, manga, gaming lore and internet culture — with a modernized, plain-text-streaming **Wikipedia** engine, plus **Fandom** community wikis for western pop culture (Star Wars, Genshin Impact, and more).
 
 ---
 
@@ -22,16 +22,24 @@ It integrates **Moegirlpedia** — the wiki dedicated to anime, manga, gaming lo
    - No more "select the exact keyword or fail" — outer book-title quotes, CJK brackets and stray punctuation are stripped locally in 0 ms, while typo-short selections auto-complete via server prefix search.
    - **Single merged request** returns up to 4 ranked candidates, each with a readable intro summary — 8/10 typical queries resolve in exactly one HTTP round-trip on 2.4 GHz Kindle Wi-Fi.
    - Confirming a candidate via the pencil icon upgrades the summary to the full article; candidates switch natively with the built-in left/right chevrons (zero custom UI).
-2. **Dual Independent Entries**
-   - Two side-by-side buttons, `萌娘百科` (Moegirlpedia) and `维基百科` (Wikipedia), appear in the text-selection highlight toolbar.
-   - **Zero-invasive architecture**: runs entirely inside the plugin sandbox. No patches to KOReader core files.
-3. **Spoiler Bar Revelation (Heimu)**
+2. **Multi-Engine Matrix (Phase 2)**
+   - **Wikipedia (ZH / EN / JA)** — general knowledge in the language of the book being read.
+   - **Moegirlpedia** — ACG / anime / gaming / internet culture (spoiler-revealed).
+   - **Fandom** — Star Wars, Genshin Impact and 380k+ western pop-culture wikis (full articles via `action=parse`, since Fandom ships no TextExtracts).
+   - **Context-aware routing**: the plugin reads the current book's `doc_props.language` and surfaces the matching button pair; an optional language lock overrides detection from the KOReader settings menu.
+3. **Language-Aware Fuzzy Retrieval**
+   - Trailing-particle stripping is now language-aware: Chinese (12 particles), Japanese (の / に / を / は / が / で …) and English (possessive `'s` only — plural `s` is deliberately never stripped, so `physics` never becomes `physic`).
+   - Latin queries match on word boundaries (`quantum` → `Quantum mechanics`), never on arbitrary byte prefixes (`wo` does not hijack `Wookieepedia`).
+   - Japanese-book misses on the zh-only Moegirlpedia auto-fallback to `ja.wikipedia` (`シャナの` → 灼眼のシャナ).
+4. **Spoiler Bar Revelation (Heimu)**
    - Moegirlpedia's signature `#252525` black spoiler bars are a pure CSS effect. Because the pipeline uses the MediaWiki `explaintext=1` plain-text mode, they never reach the display layer — covered text is always fully readable, with no solid black blocks on e-ink.
-4. **Traditional / Simplified Chinese Alignment**
+5. **Traditional / Simplified Chinese Alignment**
    - Server-side `converttitles=1` handles variant conversion — selecting `駭客任務` from a Traditional-Chinese book resolves automatically. No local conversion dictionary, no extra memory.
-5. **Book-grade Typography**
+6. **Book-grade Typography**
    - MediaWiki markup headings (`== Chapter ==`, `=== Sub-section ===`) are automatically converted into elegant **`【Chapter】`** and **`▸ Sub-section`** lines.
-6. **Cross-Engine Switching & Keyword Calibration**
+7. **gettext Internationalization**
+   - All user-facing strings are wrapped and translated via bundled `locale/*.po` + compiled `*.mo` files (zh_CN / zh_TW / ja), loaded at startup for the active KOReader UI language.
+8. **Cross-Engine Switching & Keyword Calibration**
    - When a query misses, a pre-filled retry dialog appears with **one-tap switching** to the other engine.
    - The native pencil icon in the lookup window opens a pre-filled edit dialog for trimming stray punctuation and re-querying.
 
@@ -43,14 +51,18 @@ It integrates **Moegirlpedia** — the wiki dedicated to anime, manga, gaming lo
 Open `appstore.koplugin` on your device, search for **Dual Wiki**, and install.
 
 ### Option B: Manual Installation
-1. Download the latest `koreader-dual-wiki-v1.1.0.zip` from the [Releases](../../releases) page.
+1. Download the latest `koreader-dual-wiki-v1.2.0.zip` from the [Releases](../../releases) page.
 2. Connect your reader to a computer, then copy the extracted `dual_wiki.koplugin` folder into the device's `koreader/plugins/` directory:
    ```text
    koreader/
    └── plugins/
        └── dual_wiki.koplugin/
            ├── _meta.lua
-           └── main.lua
+           ├── main.lua
+           └── locale/
+               ├── ja/LC_MESSAGES/dual_wiki.mo
+               ├── zh_CN/LC_MESSAGES/dual_wiki.mo
+               └── zh_TW/LC_MESSAGES/dual_wiki.mo
    ```
 3. Restart KOReader.
 

@@ -1,0 +1,63 @@
+# Dual Wiki plugin translation template.
+msgid ""
+msgstr ""
+"Content-Type: text/plain; charset=UTF-8\n"
+"Plural-Forms: nplurals=1; plural=0;\n"
+
+msgid "Wikipedia (JA)"
+msgstr ""
+
+msgid "Wikipedia (EN)"
+msgstr ""
+
+msgid "Wikipedia (ZH)"
+msgstr ""
+
+msgid "Moegirlpedia"
+msgstr ""
+
+msgid "Fandom (%s)"
+msgstr ""
+
+msgid "Fandom"
+msgstr ""
+
+msgid "Moegirlpedia lookup"
+msgstr ""
+
+msgid "Wikipedia lookup (Chinese)"
+msgstr ""
+
+msgid "Wikipedia lookup (English)"
+msgstr ""
+
+msgid "Wikipedia lookup (Japanese)"
+msgstr ""
+
+msgid "Fandom lookup"
+msgstr ""
+
+msgid "Article lookup"
+msgstr ""
+
+msgid "Cancel"
+msgstr ""
+
+msgid "Search"
+msgstr ""
+
+msgid "Candidate match: press and hold the pencil icon to load the full article."
+msgstr ""
+
+msgid "Querying"
+msgstr ""
+
+msgid "Not found, modify and retry:"
+msgstr ""
+
+msgid "Retry"
+msgstr ""
+
+msgid "Switch to"
+msgstr ""
+
