@@ -16,7 +16,10 @@ local hend = src:find("%-%- %[%[ query%-helpers:end %]%]")
 assert(hstart and hend, "helper markers not found")
 local helpers = src:sub(hstart, hend - 1)
 
-local chunk = assert(load(helpers .. [[
+-- Lua 5.1's load() only accepts a function; loadstring() accepts a string.
+-- LuaJIT (KOReader's runtime) accepts both via load().
+local loadchunk = loadstring or load
+local chunk = assert(loadchunk(helpers .. [[
 return {
     sanitizeQuery = sanitizeQuery,
     stripTrailingParticle = stripTrailingParticle,
