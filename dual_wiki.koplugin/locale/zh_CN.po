@@ -59,3 +59,18 @@ msgstr "重新查询"
 msgid "Switch to"
 msgstr "换查"
 
+msgid "Rate limited by the wiki server. Wait a minute and retry."
+msgstr "已被百科服务器限流，请稍候一分钟再试。"
+
+msgid "The wiki server rejected the request."
+msgstr "百科服务器拒绝了本次请求。"
+
+msgid "The wiki server is having trouble. Retry later."
+msgstr "百科服务器暂时故障，请稍后再试。"
+
+msgid "The request timed out."
+msgstr "请求超时。"
+
+msgid "The site may be unreachable or blocked on this network."
+msgstr "该站点可能无法连通，或被当前网络拦截。"
+

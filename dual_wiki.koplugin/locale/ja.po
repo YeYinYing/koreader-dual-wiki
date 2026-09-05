@@ -59,3 +59,18 @@ msgstr "再検索"
 msgid "Switch to"
 msgstr "切り替え"
 
+msgid "Rate limited by the wiki server. Wait a minute and retry."
+msgstr "サーバーにレート制限されました。1分待ってから再試行してください。"
+
+msgid "The wiki server rejected the request."
+msgstr "サーバーにリクエストを拒否されました。"
+
+msgid "The wiki server is having trouble. Retry later."
+msgstr "サーバーに問題が発生しています。後ほど再試行してください。"
+
+msgid "The request timed out."
+msgstr "リクエストがタイムアウトしました。"
+
+msgid "The site may be unreachable or blocked on this network."
+msgstr "このサイトに接続できないか、現在のネットワークでブロックされている可能性があります。"
+

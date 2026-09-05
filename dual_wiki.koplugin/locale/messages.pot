@@ -61,3 +61,18 @@ msgstr ""
 msgid "Switch to"
 msgstr ""
 
+msgid "Rate limited by the wiki server. Wait a minute and retry."
+msgstr ""
+
+msgid "The wiki server rejected the request."
+msgstr ""
+
+msgid "The wiki server is having trouble. Retry later."
+msgstr ""
+
+msgid "The request timed out."
+msgstr ""
+
+msgid "The site may be unreachable or blocked on this network."
+msgstr ""
+

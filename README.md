@@ -28,7 +28,7 @@ Encyclopedia lookup plugin for KOReader e-ink readers. Supports Wikipedia (`zh` 
 
 ## Installation
 
-Install from the KOReader AppStore (`appstore.koplugin`), or download `koreader-dual-wiki-v1.2.0.zip` from the [Releases](../../releases) page and extract it to `koreader/plugins/`:
+Install from the KOReader AppStore (`appstore.koplugin`), or download `koreader-dual-wiki-v1.2.1.zip` from the [Releases](../../releases) page and extract it to `koreader/plugins/`:
 
 ```text
 koreader/

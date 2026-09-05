@@ -1,7 +1,39 @@
 --[[--
 Dual-Engine Encyclopedia (Moegirlpedia + Wikipedia + Fandom) Plugin for KOReader.
 
-v1.2.0 — Phase 2.1 Globalization (Cross-Language Co-adaptation):
+Copyright (C) 2026 YeYinYing
+
+This program is free software: you can redistribute it and/or modify
+it under the terms of the GNU Affero General Public License as
+published by the Free Software Foundation, either version 3 of the
+License, or (at your option) any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+GNU Affero General Public License for more details.
+
+You should have received a copy of the GNU Affero General Public License
+along with this program.  If not, see <https://www.gnu.org/licenses/>.
+
+v1.2.1 — M1 Hardening Patch:
+
+1. https dispatch: socket.http vs ssl.https chosen by URL scheme (matches
+   KOReader core); fixes "invalid scheme" on builds lacking the luasocket
+   https shim.
+2. Explicit zh body-text variant (variant=zh-cn|zh-hant from raw doc
+   language) — converttitles=1 alone left the extract BODY variant
+   environment-dependent (simplified books could receive traditional text).
+3. Device-agnostic User-Agent (dual_wiki.koplugin/<ver> (KOReader)) —
+   the old value hard-coded "Kindle" on every device.
+4. Differentiated transport error reporting: 429 / 4xx / 5xx / timeout /
+   unreachable each get a specific hint instead of a generic message.
+5. Moegirl reachability fast-fail (5s probe timeout) + skip subsequent
+   moegirl stages + zh.wikipedia fallback for zh books on transport errors
+   (DNS-polluted regions previously burned the full ladder).
+
+Inherits from v1.2.0 — Phase 2.1 Globalization (Cross-Language
+Co-adaptation):
 
 1. Engine registry: wikipedia ({lang}.wikipedia.org), moegirl
    (zh.moegirl.org.cn), fandom ({sub}.fandom.com) — all MediaWiki-native.
@@ -39,6 +71,7 @@ local UIManager = require("ui/uimanager")
 local WidgetContainer = require("ui/widget/container/widgetcontainer")
 local JSON = require("json")
 local http = require("socket.http")
+local https = require("ssl.https")
 local ltn12 = require("ltn12")
 local socket = require("socket")
 local socketutil = require("socketutil")
@@ -62,10 +95,17 @@ local LF = string.char(10)
 -- (capped at 2MB: a 512MB e-ink device cannot afford unbounded remote bodies)
 local MAX_RESPONSE_BYTES = 2 * 1024 * 1024
 
+-- v1.2.1 (M1-A3): device-agnostic User-Agent. The old hard-coded
+-- "KOReader/2024.04 (Kindle)" misrepresented every device as a Kindle and
+-- skewed per-platform statistics. Bump alongside _meta.lua on release.
+local PLUGIN_VERSION = "1.2.1"
+local USER_AGENT = "dual_wiki.koplugin/" .. PLUGIN_VERSION .. " (KOReader)"
+
 -- Retrieval pipeline tuning
 local MAX_CANDIDATES = 4      -- candidates per merged request (server clamps full-text extracts to 1/page, intro mode allows all)
 local PROBE_TIMEOUT = 10      -- merged probe request timeout (seconds)
 local DIRECT_TIMEOUT = 12     -- full-article request timeout (seconds)
+local MOEGIRL_TIMEOUT = 5     -- v1.2.1 (M1-A5): fast-fail for moegirl (DNS-poisoned in some regions)
 
 -- [[ query-helpers:start ]] (pure functions, unit-testable in isolation)
 
@@ -296,6 +336,20 @@ local function normalizeLang(raw)
     return LANG_MAP[base] or "zh"
 end
 
+-- v1.2.1 (M1): resolve the explicit zh body-text variant from the raw doc
+-- language metadata. converttitles=1 only aligns TITLES server-side; the
+-- extract BODY stays in an environment-dependent variant (measured:
+-- zh.wikipedia served traditional text for a simplified book) unless
+-- variant=zh-cn|zh-hant is forced on every wikipedia+zh request.
+local ZH_HANT_SCRIPTS = { HANT = true, TW = true, HK = true, MO = true }
+local ZH_HANS_SCRIPTS = { HANS = true, CN = true, SG = true, MY = true }
+local function zhVariantOf(raw)
+    local script = tostring(raw or ""):upper():match("^ZH[_%-]?(%a*)")
+    if ZH_HANT_SCRIPTS[script] then return "zh-hant" end
+    if ZH_HANS_SCRIPTS[script] then return "zh-cn" end
+    return "zh-cn"
+end
+
 -- [[ query-helpers:end ]]
 
 -- Engine registry (多百科矩阵): MediaWiki-native endpoints with per-engine
@@ -342,29 +396,56 @@ local ENGINES = {
     },
 }
 
--- Helper to make fast HTTP GET request
+-- Helper to make fast HTTP GET request. v1.2.1 (M1-A1): dispatch by URL
+-- scheme — socket.http silently mangles https URLs on KOReader builds whose
+-- luasocket lacks the https table shim; ssl.https is what KOReader core uses.
+-- Returns ok, content_or_error_kind, detail. Error kinds let callers render a
+-- differentiated message (M1-A4) instead of a generic "network error":
+--   "http_429"  rate limited (respect Retry-After)
+--   "http_4xx"/"http_5xx"  other HTTP statuses
+--   "timeout"   socket timeout
+--   "error"     transport failure (DNS / refused / TLS)
 local function httpGet(url, timeout)
+    local transport = socket_url.parse(url).scheme == "https" and https or http
     socketutil:set_timeout(timeout or 6, 12)
     local sink = {}
-    local request = {
-        url = url,
-        method = "GET",
-        headers = {
-            ["User-Agent"] = "KOReader/2024.04 (Kindle)",
-            ["Accept"] = "application/json",
-        },
-        sink = ltn12.sink.table(sink),
-    }
-    local code, headers, status = socket.skip(1, http.request(request))
+    local code, headers, status
+    local req_ok, req_err = pcall(function()
+        code, headers, status = socket.skip(1, transport.request({
+            url = url,
+            method = "GET",
+            headers = {
+                ["User-Agent"] = USER_AGENT,
+                ["Accept"] = "application/json",
+            },
+            sink = ltn12.sink.table(sink),
+        }))
+    end)
     socketutil:reset_timeout()
+    if not req_ok then
+        local msg = tostring(req_err or ""):lower()
+        if msg:find("timeout") then
+            return false, "timeout", req_err
+        end
+        return false, "error", req_err
+    end
     local content = table.concat(sink)
-    if code and code >= 200 and code < 300 and content and #content > 0 then
+    if type(code) == "number" and code >= 200 and code < 300 and content and #content > 0 then
         if #content > MAX_RESPONSE_BYTES then
-            return false, "Response too large"
+            return false, "http_5xx", "Response too large"
         end
         return true, content
     end
-    return false, status or code or "Network error"
+    if code == 429 then
+        return false, "http_429", status
+    elseif type(code) == "number" then
+        return false, code >= 500 and "http_5xx" or "http_4xx", status or code
+    end
+    local msg = tostring(status or code or ""):lower()
+    if msg:find("timeout") then
+        return false, "timeout", status or code
+    end
+    return false, "error", status or code or "Network error"
 end
 
 -- Clean and format extract text for E-ink display (uncovers heimu & formats headings)
@@ -403,6 +484,19 @@ function DualWiki:_bookLang()
         end
     end
     return "zh"
+end
+
+-- v1.2.1 (M1): raw (un-normalized) doc language string, e.g. "zh-Hant" /
+-- "zh_CN" — needed to pick the zh body-text variant. Empty when unknown.
+function DualWiki:_rawBookLanguage()
+    local doc = self.ui and self.ui.document
+    if doc and doc.getProps then
+        local ok, props = pcall(doc.getProps, doc)
+        if ok and props and type(props.language) == "string" then
+            return props.language
+        end
+    end
+    return ""
 end
 
 function DualWiki:_defaultFandomSub()
@@ -658,12 +752,13 @@ function DualWiki:fetchCandidates(q, engine, lang, mode)
         .. "&prop=extracts&explaintext=1&exintro=1&exlimit=" .. MAX_CANDIDATES
         .. "&redirects=1&format=json&formatversion=2"
     if ENGINES[engine] and ENGINES[engine].needsConverttitles(lang) then
-        params = params .. "&converttitles=1"
+        params = params .. "&converttitles=1&variant=" .. zhVariantOf(self:_rawBookLanguage())
     end
 
     local url = buildApiURL(engine, lang, params)
-    local ok, body = httpGet(url, PROBE_TIMEOUT)
+    local ok, body = httpGet(url, (engine == "moegirl") and MOEGIRL_TIMEOUT or PROBE_TIMEOUT)
     if not ok or not body then
+        self._last_error_kind = type(body) == "string" and body or "error"
         return nil
     end
     local ok_json, data = pcall(JSON.decode, body)
@@ -681,12 +776,13 @@ function DualWiki:fetchDirect(word, engine, lang)
     local params = "&prop=extracts&explaintext=1&redirects=1&titles="
         .. socket_url.escape(q) .. "&format=json&formatversion=2"
     if ENGINES[engine] and ENGINES[engine].needsConverttitles(lang) then
-        params = params .. "&converttitles=1"
+        params = params .. "&converttitles=1&variant=" .. zhVariantOf(self:_rawBookLanguage())
     end
 
     local url = buildApiURL(engine, lang, params)
     local ok, body = httpGet(url, DIRECT_TIMEOUT)
     if not ok or not body then
+        self._last_error_kind = type(body) == "string" and body or "error"
         return nil
     end
     local ok_json, data = pcall(JSON.decode, body)
@@ -712,6 +808,7 @@ function DualWiki:fetchFandomArticle(word, sub)
         .. "&prop=text&disablepp=1&format=json&formatversion=2"
     local ok, body = httpGet(url, DIRECT_TIMEOUT)
     if not ok or not body then
+        self._last_error_kind = type(body) == "string" and body or "error"
         return nil
     end
     local ok_json, data = pcall(JSON.decode, body)
@@ -722,6 +819,17 @@ function DualWiki:fetchFandomArticle(word, sub)
     if #text == 0 then return nil end
     return { { title = q, extract = text, index = 1 } }
 end
+
+-- v1.2.1 (M1-A4): human-readable hint per transport error kind, so users can
+-- self-diagnose (rate limited vs offline vs slow site) instead of seeing a
+-- generic "network error".
+local ERROR_HINTS = {
+    http_429 = _("Rate limited by the wiki server. Wait a minute and retry."),
+    http_4xx = _("The wiki server rejected the request."),
+    http_5xx = _("The wiki server is having trouble. Retry later."),
+    timeout  = _("The request timed out."),
+    error    = _("The site may be unreachable or blocked on this network."),
+}
 
 -- Degradation ladder (each step is a single merged request):
 --   1. prefixsearch(sanitized query)
@@ -737,15 +845,25 @@ function DualWiki:queryPipeline(word, engine, lang)
     local q2 = stripTrailingParticle(q0, plang)
 
     -- Stage 1: merged prefixsearch probe (up to 4 ranked candidates).
+    -- v1.2.1 (M1-A5): moegirl fast-fails at MOEGIRL_TIMEOUT; a transport-level
+    -- failure (timeout/error, NOT a mere zero-hit) skips the remaining moegirl
+    -- stages and hands straight to the cross-engine fallback ladder.
     local r1 = self:fetchCandidates(q0, engine, lang, "prefix")
+    if r1 == nil and engine == "moegirl"
+        and (self._last_error_kind == "timeout" or self._last_error_kind == "error") then
+        self._moegirl_unreachable = true
+    else
+        self._moegirl_unreachable = false
+    end
     if hasGoodHit(r1, q0, plang) then
         return r1, false
     end
 
     -- Stage 2: trailing-particle drop retry (量子力学的 → 量子力学,
     -- シャナの → シャナ, Oppenheimer's → Oppenheimer).
+    -- Skipped when moegirl itself is unreachable (no point re-hitting it).
     local r2 = nil
-    if q2 ~= q0 and utf8Len(q2) >= 2 then
+    if q2 ~= q0 and utf8Len(q2) >= 2 and not self._moegirl_unreachable then
         r2 = self:fetchCandidates(q2, engine, lang, "prefix")
         if hasGoodHit(r2, q2, plang) then
             return r2, false
@@ -768,19 +886,26 @@ function DualWiki:queryPipeline(word, engine, lang)
 
     -- Stage 5: full-text search fallback (catches dab-page tops like
     -- 三体 → 三體 with no content, where search resolves 三体 (小说)).
-    local s = self:fetchCandidates(q0, engine, lang, "search")
+    -- Also skipped on an unreachable moegirl.
+    local s = nil
+    if not self._moegirl_unreachable then
+        s = self:fetchCandidates(q0, engine, lang, "search")
+    end
     if s and #s > 0 and sharesPrefixAny(s, q2 ~= q0 and q2 or q0, plang) then
         return s, false
     end
 
-    -- Stage 6 (cross-engine synergy): a Japanese book query that zero-hits on
-    -- the zh-only moegirl site falls back to ja.wikipedia — kana terms like
-    -- シャナ resolve there (灼眼のシャナ), while moegirl's index points シャナ
-    -- at an unrelated "Shanna".
-    if engine == "moegirl" and lang == "ja" then
-        local fallback = self:queryPipeline(word, "wikipedia", "ja")
-        if fallback and #fallback > 0 then
-            return fallback, false
+    -- Stage 6 (cross-engine synergy): moegirl zero-hits or transport failures
+    -- degrade to wikipedia — ja-book kana queries resolve on ja.wikipedia
+    -- (灼眼のシャナ), zh-book queries on zh.wikipedia. This is the v1.2.1
+    -- moegirl-reachability escape hatch for DNS-poisoned regions.
+    if engine == "moegirl" then
+        local fallback_lang = (lang == "ja") and "ja" or "zh"
+        if lang == "ja" or self._moegirl_unreachable then
+            local fallback = self:queryPipeline(word, "wikipedia", fallback_lang)
+            if fallback and #fallback > 0 then
+                return fallback, false
+            end
         end
     end
 
@@ -908,6 +1033,17 @@ function DualWiki:showRetryDialog(failed_word, engine, word_boxes, lang)
     local switch_btn_text = target_cfg and string.format("%s → %s", _("Switch to"), target_cfg.label(
         target == "wikipedia" and (lang == "ja" and "ja" or lang == "en" and "en" or "zh") or "zh"
     )) or _("Retry")
+
+    -- v1.2.1 (M1-A4): surface the transport failure kind so the user can
+    -- self-diagnose (rate limit vs offline vs unreachable site).
+    local kind = self._last_error_kind
+    if kind and ERROR_HINTS[kind] then
+        UIManager:show(InfoMessage:new{
+            text = cfg.label(lang) .. LF .. ERROR_HINTS[kind],
+            timeout = 4,
+        })
+        self._last_error_kind = nil
+    end
 
     local retry_dialog
     retry_dialog = InputDialog:new{
