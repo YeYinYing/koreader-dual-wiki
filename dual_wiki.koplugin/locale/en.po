@@ -1,0 +1,156 @@
+msgid ""
+msgstr ""
+"Content-Type: text/plain; charset=UTF-8\nPlural-Forms: nplurals=2; plural=(n != 1);\n"
+
+msgid "Wikipedia (JA)"
+msgstr "Wikipedia (JA)"
+
+msgid "Wikipedia (EN)"
+msgstr "Wikipedia (EN)"
+
+msgid "Wikipedia (ZH)"
+msgstr "Wikipedia (ZH)"
+
+msgid "Wikipedia (%s)"
+msgstr "Wikipedia (%s)"
+
+msgid "Moegirlpedia"
+msgstr "Moegirlpedia"
+
+msgid "Fandom (%s)"
+msgstr "Fandom (%s)"
+
+msgid "Fandom"
+msgstr "Fandom"
+
+msgid "Bilibili Game Wiki (%s)"
+msgstr "Bilibili Game Wiki (%s)"
+
+msgid "Bilibili Game Wiki"
+msgstr "Bilibili Game Wiki"
+
+msgid "Wiktionary (JA)"
+msgstr "Wiktionary (JA)"
+
+msgid "Wiktionary (EN)"
+msgstr "Wiktionary (EN)"
+
+msgid "Wiktionary"
+msgstr "Wiktionary"
+
+msgid "Moegirlpedia lookup"
+msgstr "Moegirlpedia lookup"
+
+msgid "Wikipedia lookup (Chinese)"
+msgstr "Wikipedia lookup (Chinese)"
+
+msgid "Wikipedia lookup (English)"
+msgstr "Wikipedia lookup (English)"
+
+msgid "Wikipedia lookup (Japanese)"
+msgstr "Wikipedia lookup (Japanese)"
+
+msgid "Wiktionary lookup"
+msgstr "Wiktionary lookup"
+
+msgid "Fandom lookup"
+msgstr "Fandom lookup"
+
+msgid "Bilibili Game Wiki lookup"
+msgstr "Bilibili Game Wiki lookup"
+
+msgid "Dual Wiki settings"
+msgstr "Dual Wiki settings"
+
+msgid "Language lock (this book)"
+msgstr "Language lock (this book)"
+
+msgid "Language lock (global default)"
+msgstr "Language lock (global default)"
+
+msgid "Auto (detect from book)"
+msgstr "Auto (detect from book)"
+
+msgid "Chinese (ZH)"
+msgstr "Chinese (ZH)"
+
+msgid "English (EN)"
+msgstr "English (EN)"
+
+msgid "Japanese (JA)"
+msgstr "Japanese (JA)"
+
+msgid "German (DE)"
+msgstr "German (DE)"
+
+msgid "French (FR)"
+msgstr "French (FR)"
+
+msgid "Spanish (ES)"
+msgstr "Spanish (ES)"
+
+msgid "Russian (RU)"
+msgstr "Russian (RU)"
+
+msgid "Fandom community: %1"
+msgstr "Fandom community: %1"
+
+msgid "Bilibili game wiki: %1"
+msgstr "Bilibili game wiki: %1"
+
+msgid "Clear session lookup cache"
+msgstr "Clear session lookup cache"
+
+msgid "Session lookup cache cleared."
+msgstr "Session lookup cache cleared."
+
+msgid "Enter wiki subdomain"
+msgstr "Enter wiki subdomain"
+
+msgid "e.g. %1"
+msgstr "e.g. %1"
+
+msgid "Save"
+msgstr "Save"
+
+msgid "Article lookup"
+msgstr "Article lookup"
+
+msgid "Cancel"
+msgstr "Cancel"
+
+msgid "Search"
+msgstr "Search"
+
+msgid "Candidate match: press and hold the pencil icon to load the full article."
+msgstr "Candidate match: press and hold the pencil icon to load the full article."
+
+msgid "Querying"
+msgstr "Querying"
+
+msgid "Not found, modify and retry:"
+msgstr "Not found, modify and retry:"
+
+msgid "Retry"
+msgstr "Retry"
+
+msgid "Switch to"
+msgstr "Switch to"
+
+msgid "Rate limited by the wiki server. Wait a minute and retry."
+msgstr "Rate limited by the wiki server. Wait a minute and retry."
+
+msgid "The wiki server rejected the request."
+msgstr "The wiki server rejected the request."
+
+msgid "The wiki server is having trouble. Retry later."
+msgstr "The wiki server is having trouble. Retry later."
+
+msgid "The request timed out."
+msgstr "The request timed out."
+
+msgid "The site may be unreachable or blocked on this network."
+msgstr "The site may be unreachable or blocked on this network."
+
+msgid "The article is too large to display on this device."
+msgstr "The article is too large to display on this device."

@@ -79,3 +79,81 @@ msgstr ""
 msgid "The article is too large to display on this device."
 msgstr ""
 
+msgid "Wikipedia (%s)"
+msgstr ""
+
+msgid "Bilibili Game Wiki (%s)"
+msgstr ""
+
+msgid "Bilibili Game Wiki"
+msgstr ""
+
+msgid "Wiktionary (JA)"
+msgstr ""
+
+msgid "Wiktionary (EN)"
+msgstr ""
+
+msgid "Wiktionary"
+msgstr ""
+
+msgid "Wiktionary lookup"
+msgstr ""
+
+msgid "Bilibili Game Wiki lookup"
+msgstr ""
+
+msgid "Dual Wiki settings"
+msgstr ""
+
+msgid "Language lock (this book)"
+msgstr ""
+
+msgid "Language lock (global default)"
+msgstr ""
+
+msgid "Auto (detect from book)"
+msgstr ""
+
+msgid "Chinese (ZH)"
+msgstr ""
+
+msgid "English (EN)"
+msgstr ""
+
+msgid "Japanese (JA)"
+msgstr ""
+
+msgid "German (DE)"
+msgstr ""
+
+msgid "French (FR)"
+msgstr ""
+
+msgid "Spanish (ES)"
+msgstr ""
+
+msgid "Russian (RU)"
+msgstr ""
+
+msgid "Fandom community: %1"
+msgstr ""
+
+msgid "Bilibili game wiki: %1"
+msgstr ""
+
+msgid "Clear session lookup cache"
+msgstr ""
+
+msgid "Session lookup cache cleared."
+msgstr ""
+
+msgid "Enter wiki subdomain"
+msgstr ""
+
+msgid "e.g. %1"
+msgstr ""
+
+msgid "Save"
+msgstr ""
+

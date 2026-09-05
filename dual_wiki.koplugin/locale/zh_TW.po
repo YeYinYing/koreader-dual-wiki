@@ -77,3 +77,81 @@ msgstr "該站點可能無法連線，或被目前網路攔截。"
 msgid "The article is too large to display on this device."
 msgstr "該詞條過長，無法在本裝置上完整顯示。"
 
+msgid "Wikipedia (%s)"
+msgstr "維基百科 (%s)"
+
+msgid "Bilibili Game Wiki (%s)"
+msgstr "B站遊戲百科 (%s)"
+
+msgid "Bilibili Game Wiki"
+msgstr "B站遊戲百科"
+
+msgid "Wiktionary (JA)"
+msgstr "維基詞典 (日文)"
+
+msgid "Wiktionary (EN)"
+msgstr "維基詞典 (英文)"
+
+msgid "Wiktionary"
+msgstr "維基詞典"
+
+msgid "Wiktionary lookup"
+msgstr "維基詞典查詢"
+
+msgid "Bilibili Game Wiki lookup"
+msgstr "B站遊戲百科查詢"
+
+msgid "Dual Wiki settings"
+msgstr "Dual Wiki 設定"
+
+msgid "Language lock (this book)"
+msgstr "語言鎖定（本書）"
+
+msgid "Language lock (global default)"
+msgstr "語言鎖定（全域預設）"
+
+msgid "Auto (detect from book)"
+msgstr "自動（跟隨書籍偵測）"
+
+msgid "Chinese (ZH)"
+msgstr "中文 (ZH)"
+
+msgid "English (EN)"
+msgstr "英文 (EN)"
+
+msgid "Japanese (JA)"
+msgstr "日文 (JA)"
+
+msgid "German (DE)"
+msgstr "德文 (DE)"
+
+msgid "French (FR)"
+msgstr "法文 (FR)"
+
+msgid "Spanish (ES)"
+msgstr "西班牙文 (ES)"
+
+msgid "Russian (RU)"
+msgstr "俄文 (RU)"
+
+msgid "Fandom community: %1"
+msgstr "Fandom 社群：%1"
+
+msgid "Bilibili game wiki: %1"
+msgstr "B站遊戲百科：%1"
+
+msgid "Clear session lookup cache"
+msgstr "清除本次查詢快取"
+
+msgid "Session lookup cache cleared."
+msgstr "查詢快取已清除。"
+
+msgid "Enter wiki subdomain"
+msgstr "輸入 wiki 子網域"
+
+msgid "e.g. %1"
+msgstr "例如：%1"
+
+msgid "Save"
+msgstr "儲存"
+

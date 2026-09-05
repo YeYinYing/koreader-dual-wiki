@@ -77,3 +77,81 @@ msgstr "このサイトに接続できないか、現在のネットワークで
 msgid "The article is too large to display on this device."
 msgstr "この項目は長すぎるため、この端末では表示できません。"
 
+msgid "Wikipedia (%s)"
+msgstr "Wikipedia (%s)"
+
+msgid "Bilibili Game Wiki (%s)"
+msgstr "ビリビリゲームWiki (%s)"
+
+msgid "Bilibili Game Wiki"
+msgstr "ビリビリゲームWiki"
+
+msgid "Wiktionary (JA)"
+msgstr "ウィクショナリー (JA)"
+
+msgid "Wiktionary (EN)"
+msgstr "ウィクショナリー (EN)"
+
+msgid "Wiktionary"
+msgstr "ウィクショナリー"
+
+msgid "Wiktionary lookup"
+msgstr "ウィクショナリー検索"
+
+msgid "Bilibili Game Wiki lookup"
+msgstr "ビリビリゲームWiki検索"
+
+msgid "Dual Wiki settings"
+msgstr "Dual Wiki 設定"
+
+msgid "Language lock (this book)"
+msgstr "言語ロック（この本）"
+
+msgid "Language lock (global default)"
+msgstr "言語ロック（グローバル既定）"
+
+msgid "Auto (detect from book)"
+msgstr "自動（書籍から検出）"
+
+msgid "Chinese (ZH)"
+msgstr "中国語 (ZH)"
+
+msgid "English (EN)"
+msgstr "英語 (EN)"
+
+msgid "Japanese (JA)"
+msgstr "日本語 (JA)"
+
+msgid "German (DE)"
+msgstr "ドイツ語 (DE)"
+
+msgid "French (FR)"
+msgstr "フランス語 (FR)"
+
+msgid "Spanish (ES)"
+msgstr "スペイン語 (ES)"
+
+msgid "Russian (RU)"
+msgstr "ロシア語 (RU)"
+
+msgid "Fandom community: %1"
+msgstr "Fandom コミュニティ：%1"
+
+msgid "Bilibili game wiki: %1"
+msgstr "ビリビリゲームWiki：%1"
+
+msgid "Clear session lookup cache"
+msgstr "セッション検索キャッシュをクリア"
+
+msgid "Session lookup cache cleared."
+msgstr "検索キャッシュをクリアしました。"
+
+msgid "Enter wiki subdomain"
+msgstr "Wiki サブドメインを入力"
+
+msgid "e.g. %1"
+msgstr "例：%1"
+
+msgid "Save"
+msgstr "保存"
+

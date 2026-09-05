@@ -1,0 +1,52 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Lua
+        run: sudo apt-get update && sudo apt-get install -y lua5.1 luajit lua-busted
+
+      - name: Syntax check (luac -p)
+        run: |
+          luac -p dual_wiki.koplugin/main.lua
+          luac -p dual_wiki.koplugin/_meta.lua
+          luac -p tests/test_query_helpers.lua
+
+      - name: Unit tests (query helpers)
+        run: lua tests/test_query_helpers.lua dual_wiki.koplugin/main.lua
+
+      - name: Locale sanity (mo files up to date)
+        run: |
+          sudo apt-get install -y gettext
+          for po in dual_wiki.koplugin/locale/*.po; do
+            lang=$(basename "$po" .po)
+            msgfmt -o "/tmp/$lang.mo" "$po"
+            bundled="dual_wiki.koplugin/locale/$lang/LC_MESSAGES/dual_wiki.mo"
+            if [ "$lang" = "messages" ]; then continue; fi
+            if ! cmp -s "/tmp/$lang.mo" "$bundled"; then
+              echo "::error::$bundled is stale — recompile from $po (msgfmt -o $bundled $po)"
+              exit 1
+            fi
+          done
+
+      - name: Package release zip
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          VERSION="${GITHUB_REF#refs/tags/v}"
+          zip -r "koreader-dual-wiki-v${VERSION}.zip" dual_wiki.koplugin -x "*.DS_Store"
+
+      - name: Attach zip to release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: koreader-dual-wiki-v*.zip
+          fail_on_unmatched_files: true

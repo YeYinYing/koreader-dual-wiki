@@ -1,5 +1,23 @@
 # Changelog
 
+## [1.3.0] - 2026-09-06
+
+### Added
+
+- **Phase 2.2 European languages**: German / French / Spanish / Russian Wikipedia. The five hard-coded highlight buttons collapse into two dynamic slots whose factory re-resolves the book language on every highlight-menu invocation — de/fr/es/ru books get `[Wikipedia (XX)] [Wikipedia (EN)]` automatically.
+- **Settings hub** (menu → Dual Wiki settings): language lock per book (stored in the book's sdr) and globally (auto/zh/en/ja/de/fr/es/ru), Fandom community and Bilibili game wiki subdomain prompts, and a session-cache clear button. This fulfils the language-lock UI commitment from the HANDOVER section 5 architecture spec.
+- **New engines**: Bilibili Game Wiki (`wiki.biligame.com`, MediaWiki, reuses the parse adapter) and Wiktionary (en/ja) for word definitions; both reachable from the search menu.
+- **Two-phase parse fetch**: engines without TextExtracts (Fandom / BWiki / Wiktionary) now fetch the section=0 intro first (tens of KB) and only pull the full page when the intro is under 300 bytes — low-RAM devices no longer routinely decode 1.5 MB Fandom JSON.
+- **Session lookup cache**: identical word/engine/language repeats skip the network (LRU-capped at 32 entries), cleared on document close or from the settings menu.
+- **`en.po`** locale (msgid == msgstr) for translation-platform completeness; 26 new translated msgids across zh_CN / zh_TW / ja.
+- **CI** (GitHub Actions): syntax check, unit tests, and a stale-`.mo` guard on every push; tag pushes automatically build and attach the release zip.
+- **`tests/`** checked into the repository (previously an ad-hoc /tmp script): 59 assertions covering the sanitation matrix, cross-language particles, good-hit rules, language normalization and the zh body-variant resolver.
+
+### Changed
+
+- `sharesPrefix` Latin branch generalized from `[%a']+` to `%S+` so Cyrillic (Russian) titles pass the prefix-relation guard.
+- `normalizeLang` extended: `ger/deu→de`, `fre/fra→fr`, `spa→es`, `rus→ru` (previously all fell back to zh).
+
 ## [1.2.2] - 2026-09-05
 
 ### Fixed
