@@ -40,6 +40,18 @@ do_test() {
   "$LUAJIT" "$REPO_ROOT/tests/test_query_helpers.lua" "$PLUGIN_SRC/main.lua"
 }
 
+do_integration() {
+  # Real-network integration inside the emu runtime: every engine hit for
+  # real (wikipedia zh/en/ja/de/fr/es/ru, moegirl, fandom, bwiki,
+  # wiktionary) with only the UI surface stubbed. Throttles requests.
+  if [ ! -d "$RUNTIME_DIR" ]; then
+    echo "emu runtime not found (run: cd $EMU_SRC && ./kodev build)" >&2
+    exit 1
+  fi
+  cd "$RUNTIME_DIR"
+  "$LUAJIT" "$REPO_ROOT/tests/test_integration.lua"
+}
+
 do_run() {
   ensure_env
   cd "$RUNTIME_DIR"
@@ -73,8 +85,9 @@ do_smoke() {
 case "${1:-all}" in
   deploy) do_deploy ;;
   test)   do_test ;;
+  integration) do_integration ;;
   run)    do_run ;;
   smoke)  do_smoke "${2:-15}" ;;
   all)    do_deploy && do_test ;;
-  *)      echo "usage: $0 {deploy|test|run|smoke [secs]|all}" >&2; exit 1 ;;
+  *)      echo "usage: $0 {deploy|test|integration|run|smoke [secs]|all}" >&2; exit 1 ;;
 esac
