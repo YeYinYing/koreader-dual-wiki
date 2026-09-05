@@ -1,11 +1,27 @@
 --[[--
 Dual-Engine Encyclopedia (Moegirlpedia + Wikipedia) Plugin for KOReader.
 
+v1.1.0 — Fuzzy-Tolerant Retrieval Architecture (Plan A):
+
+1. Local query sanitation (0ms): strips outer CJK/ASCII wrapper brackets
+   (《》“”【】（） etc.) and zero-width noise, never touching in-word
+   punctuation (Re:…, Fate/stay night, 拿破仑·波拿巴 stay intact).
+2. Single-round-trip candidate pipeline: one merged MediaWiki request
+   (generator=prefixsearch + prop=extracts, intro mode) returns up to 4
+   ranked candidates *with readable summaries* — no second handshake on
+   the happy path, even on 2.4GHz Kindle Wi-Fi.
+3. Graceful degradation ladder: prefix(q) → prefix(q minus one trailing
+   particle) → generator=search full-text fallback → retry dialog.
+4. On-demand full article: confirm the same word via the pencil icon to
+   upgrade the summary to the uncapped full extract (single request).
+5. Traditional/Simplified Chinese alignment via server-side
+   converttitles=1 (no local conversion tables).
+
 Enables seamless online search and definition lookup of:
-1. ACG / Anime terms from Moegirlpedia (zh.moegirl.org.cn) with spoiler revelation
+1. ACG / Anime terms from Moegirlpedia (zh.moegirl.org.cn)
 2. General knowledge, science, and history from Wikipedia (zh/ja/en.wikipedia.org)
-using native KOReader UI widgets, full article extracts, book-grade formatting,
-sub-second plain-text queries, and zero-hang offline handling.
+using native KOReader UI widgets, book-grade formatting, sub-second
+plain-text queries, and zero-hang offline handling.
 --]]--
 
 local DictQuickLookup = require("ui/widget/dictquicklookup")
@@ -35,9 +51,186 @@ local MOEGIRL_BASE = "https://zh.moegirl.org.cn/api.php"
 -- Safe linefeed character constant
 local LF = string.char(10)
 
--- Helper to make fast HTTP GET request
 -- (capped at 2MB: a 512MB e-ink device cannot afford unbounded remote bodies)
 local MAX_RESPONSE_BYTES = 2 * 1024 * 1024
+
+-- Retrieval pipeline tuning
+local MAX_CANDIDATES = 4      -- candidates per merged request (server clamps full-text extracts to 1/page, intro mode allows all)
+local PROBE_TIMEOUT = 10      -- merged probe request timeout (seconds)
+local DIRECT_TIMEOUT = 12     -- full-article request timeout (seconds)
+
+-- [[ query-helpers:start ]] (pure functions, unit-testable in isolation)
+
+local function strTrim(s)
+    return (s or ""):gsub("^%s+", ""):gsub("%s+$", "")
+end
+
+-- Minimal UTF-8 helpers (byte-walking, no external deps, Lua 5.1 safe)
+local function utf8Len(s)
+    local n, i = 0, 1
+    while i <= #s do
+        n = n + 1
+        local b = s:byte(i)
+        if b < 0x80 then i = i + 1
+        elseif b < 0xE0 then i = i + 2
+        elseif b < 0xF0 then i = i + 3
+        else i = i + 4 end
+    end
+    return n
+end
+
+local function utf8First(s)
+    if #s == 0 then return "" end
+    local b = s:byte(1)
+    local w = b < 0x80 and 1 or (b < 0xE0 and 2 or (b < 0xF0 and 3 or 4))
+    return s:sub(1, w)
+end
+
+local function utf8Last(s)
+    if #s == 0 then return "" end
+    local i = #s
+    while i > 1 do
+        local b = s:byte(i)
+        if b < 0x80 or b >= 0xC0 then break end
+        i = i - 1
+    end
+    return s:sub(i)
+end
+
+-- which: "head" | "tail" | "both"
+local function utf8Chop(s, which)
+    if #s == 0 then return s end
+    if which == "head" then
+        return s:sub(#utf8First(s) + 1)
+    elseif which == "tail" then
+        return s:sub(1, #s - #utf8Last(s))
+    else
+        return s:sub(#utf8First(s) + 1, #s - #utf8Last(s))
+    end
+end
+
+-- A "good hit" is an exact match, or a title that is only slightly longer
+-- than the query while sharing its full prefix (小笠原道 → 小笠原道大).
+-- Long prefix-noise titles (量子力学的 → 量子力学的数学基础) do NOT qualify,
+-- so the pipeline keeps degrading to the particle-stripped query.
+local function hasGoodHit(cands, q)
+    if not cands then return false end
+    local q_len = utf8Len(q)
+    for _, c in ipairs(cands) do
+        if c.title == q then
+            return true
+        end
+        if q_len >= 2 and c.title:sub(1, #q) == q and utf8Len(c.title) - q_len <= 2 then
+            return true
+        end
+    end
+    return false
+end
+
+-- Zero-width noise: U+200B/200C/200D (UTF-8: E2 80 8B/8C/8D) and U+FEFF (EF BB BF)
+local ZERO_WIDTH = { "\226\128\139", "\226\128\140", "\226\128\141", "\239\187\191" }
+
+-- Wrapper brackets eligible for stripping. CJK only for unmatched-side
+-- stripping: ASCII ( ) " ' are legal in-word characters ((G)I-DLE, 1") and
+-- must never be touched.
+local OPEN_WRAPPERS = { ["《"] = "》", ["「"] = "」", ["『"] = "』", ["【"] = "】", ["［"] = "］", ["（"] = "）", ["〈"] = "〉", ["〔"] = "〕", ["“"] = "”", ["‘"] = "’", ["«"] = "»" }
+local CLOSE_WRAPPERS = { ["》"] = true, ["」"] = true, ["』"] = true, ["】"] = true, ["］"] = true, ["）"] = true, ["〉"] = true, ["〕"] = true, ["”"] = true, ["’"] = true, ["»"] = true }
+
+-- Stage-1 sanitation: wrapper brackets + zero-width noise + whitespace.
+-- Audit rule (mishit guard): only the OUTERMOST pairing is stripped, never
+-- any in-word punctuation (: / · - etc. are untouched).
+local function sanitizeQuery(raw)
+    local q = raw or ""
+    for _, zw in ipairs(ZERO_WIDTH) do
+        q = q:gsub(zw, "")
+    end
+    q = q:gsub("^%s+", ""):gsub("%s+$", "")
+    q = q:gsub("%s+", " ")
+    for _ = 1, 4 do
+        if q == "" then break end
+        local head, tail = utf8First(q), utf8Last(q)
+        if OPEN_WRAPPERS[head] == tail then
+            q = utf8Chop(q, "both")
+        elseif CLOSE_WRAPPERS[tail] and not OPEN_WRAPPERS[head] then
+            q = utf8Chop(q, "tail")
+        elseif OPEN_WRAPPERS[head] and not CLOSE_WRAPPERS[tail] then
+            if utf8Len(q) > 2 then
+                q = utf8Chop(q, "head")
+            else
+                break
+            end
+        else
+            break
+        end
+    end
+    if q == "" then q = raw or "" end
+    return q
+end
+
+-- Stage-2 sanitation: drop ONE trailing Chinese particle (的地得了着过等中下里上),
+-- only as a fallback after the exact query missed. Byte-exact comparison (no
+-- Lua byte-class patterns) prevents false hits inside other CJK characters.
+local TRAILING_PARTICLES = { "的", "地", "得", "了", "着", "过", "等", "中", "下", "里", "上", "之" }
+local function stripTrailingParticle(q)
+    if q == "" or utf8Len(q) <= 2 then return q end
+    local tail = utf8Last(q)
+    for _, p in ipairs(TRAILING_PARTICLES) do
+        if tail == p then
+            return q:sub(1, #q - #p)
+        end
+    end
+    return q
+end
+
+-- Rank merged-request candidates. Server index order (already
+-- redirect-expanded and prefix-relevance sorted) is authoritative; we only
+-- promote an EXACT title match to the front. Byte-prefix re-ranking is
+-- deliberately avoided: zh.wikipedia redirects (三体→三體) would otherwise be
+-- pushed below longer prefix-noise titles.
+local function parseCandidatePages(data, query)
+    local pages = data.query.pages
+    if type(pages) ~= "table" then return nil end
+    local cands = {}
+    for _, page in ipairs(pages) do
+        if type(page) == "table" and page.title and page.ns == 0 and not page.missing then
+            cands[#cands + 1] = {
+                title = page.title,
+                extract = page.extract or "",
+                index = page.index or 999,
+                exact = (page.title == query),
+            }
+        end
+    end
+    table.sort(cands, function(a, b)
+        if a.exact ~= b.exact then
+            return a.exact
+        end
+        return a.index < b.index
+    end)
+    return #cands > 0 and cands or nil
+end
+
+-- A "good hit" is an exact match, or a title that is only slightly longer
+-- than the query while sharing its full prefix (小笠原道 → 小笠原道大).
+-- Long prefix-noise titles (量子力学的 → 量子力学的数学基础) do NOT qualify,
+-- so the pipeline keeps degrading to the particle-stripped query.
+local function hasGoodHit(cands, q)
+    if not cands then return false end
+    local q_len = utf8Len(q)
+    for _, c in ipairs(cands) do
+        if c.title == q then
+            return true
+        end
+        if q_len >= 2 and c.title:sub(1, #q) == q and utf8Len(c.title) - q_len <= 2 then
+            return true
+        end
+    end
+    return false
+end
+
+-- [[ query-helpers:end ]]
+
+-- Helper to make fast HTTP GET request
 local function httpGet(url, timeout)
     socketutil:set_timeout(timeout or 6, 12)
     local sink = {}
@@ -75,6 +268,14 @@ local function cleanWikiExtract(text)
     -- Trim leading and trailing whitespace
     text = text:match("^%s*(.-)%s*$") or text
     return text
+end
+
+-- Unified MediaWiki API URL builder (both engines are MediaWiki-native)
+local function buildApiURL(engine, lang, params)
+    if engine == "moegirl" then
+        return MOEGIRL_BASE .. "?action=query" .. params
+    end
+    return string.format("https://%s.wikipedia.org/w/api.php?action=query", lang or "zh") .. params
 end
 
 function DualWiki:init()
@@ -176,7 +377,15 @@ function DualWiki:showSearchDialog(engine, initial_query, word_boxes, lang)
                         local query = input_dialog:getInputText()
                         if query and query ~= "" then
                             UIManager:close(input_dialog)
-                            self:lookup(query, engine, word_boxes, lang)
+                            -- Confirming a currently listed candidate upgrades it
+                            -- to the full article; a modified word re-runs the
+                            -- fuzzy pipeline instead.
+                            local trimmed = strTrim(query)
+                            local want_full = trimmed ~= ""
+                                and self._last_candidate_titles ~= nil
+                                and self._last_candidate_titles[trimmed] ~= nil
+                                and not self._last_was_full
+                            self:lookup(query, engine, word_boxes, lang, want_full)
                         end
                     end,
                 },
@@ -187,10 +396,127 @@ function DualWiki:showSearchDialog(engine, initial_query, word_boxes, lang)
     input_dialog:onShowKeyboard()
 end
 
-function DualWiki:lookup(word, engine, word_boxes, lang)
+-- Merged probe request: one HTTP round-trip returns up to MAX_CANDIDATES
+-- ranked candidates, each with a readable intro summary (exintro mode keeps
+-- exlimit unclamped; full-text mode is server-clamped to 1 page).
+-- mode: "prefix" (generator=prefixsearch) or "search" (generator=search).
+function DualWiki:fetchCandidates(q, engine, lang, mode)
+    local esc_q = socket_url.escape(q)
+    local params
+    if mode == "search" then
+        params = string.format("&generator=search&gsrsearch=%s&gsrlimit=%d", esc_q, MAX_CANDIDATES)
+    else
+        params = string.format("&generator=prefixsearch&gpssearch=%s&gpslimit=%d", esc_q, MAX_CANDIDATES)
+    end
+    params = params
+        .. "&prop=extracts&explaintext=1&exintro=1&exlimit=" .. MAX_CANDIDATES
+        .. "&redirects=1&format=json&formatversion=2"
+    if engine == "wikipedia" and (lang or "zh") == "zh" then
+        params = params .. "&converttitles=1"
+    end
+
+    local url = buildApiURL(engine, lang, params)
+    local ok, body = httpGet(url, PROBE_TIMEOUT)
+    if not ok or not body then
+        return nil
+    end
+    local ok_json, data = pcall(JSON.decode, body)
+    if not ok_json or type(data) ~= "table" or not data.query or type(data.query.pages) ~= "table" then
+        return nil
+    end
+    return parseCandidatePages(data, q)
+end
+
+-- Direct single-page full-article fetch (used by same-word pencil confirm).
+-- formatversion=2 returns pages as an array; redirects are server-expanded.
+function DualWiki:fetchDirect(word, engine, lang)
+    local q = sanitizeQuery(word)
+    if q == "" then q = word end
+    local params = "&prop=extracts&explaintext=1&redirects=1&titles="
+        .. socket_url.escape(q) .. "&format=json&formatversion=2"
+    if engine == "wikipedia" and (lang or "zh") == "zh" then
+        params = params .. "&converttitles=1"
+    end
+
+    local url = buildApiURL(engine, lang, params)
+    local ok, body = httpGet(url, DIRECT_TIMEOUT)
+    if not ok or not body then
+        return nil
+    end
+    local ok_json, data = pcall(JSON.decode, body)
+    if not ok_json or type(data) ~= "table" or not data.query or type(data.query.pages) ~= "table" then
+        return nil
+    end
+    for _, page in ipairs(data.query.pages) do
+        if type(page) == "table" and page.title and not page.missing
+            and page.extract and #page.extract > 0 then
+            return { { title = page.title, extract = page.extract, index = 1 } }
+        end
+    end
+    return nil
+end
+
+-- Degradation ladder (each step is a single merged request):
+--   1. prefixsearch(sanitized query)
+--   2. prefixsearch(query minus ONE trailing particle)
+--   3. generator=search full-text fallback
+--   4. en.wikipedia retry for pure-Latin queries on zh
+function DualWiki:queryPipeline(word, engine, lang)
+    local q0 = sanitizeQuery(word)
+    if q0 == "" then q0 = word end
+    local q2 = stripTrailingParticle(q0)
+
+    -- Stage 1: merged prefixsearch probe (up to 4 ranked candidates).
+    local r1 = self:fetchCandidates(q0, engine, lang, "prefix")
+    if hasGoodHit(r1, q0) then
+        return r1, false
+    end
+
+    -- Stage 2: trailing-particle drop retry (量子力学的 → 量子力学).
+    local r2 = nil
+    if q2 ~= q0 and utf8Len(q2) >= 2 then
+        r2 = self:fetchCandidates(q2, engine, lang, "prefix")
+        if hasGoodHit(r2, q2) then
+            return r2, false
+        end
+    end
+
+    -- Stage 3: English fallback for pure-Latin queries on zh.
+    if engine == "wikipedia" and lang == "zh" and q0:match("^[%a%s%-%d%p]+$") then
+        return self:queryPipeline(word, engine, "en")
+    end
+
+    -- Stage 4: the top candidate carries real content even without a crisp
+    -- prefix match (server-side redirect targets: (G)I-DLE → I-dle,
+    -- 拿破仑·波拿巴 → 拿破仑一世). Accept it and stop.
+    if r1 and r1[1] and #(r1[1].extract or "") >= 60 then
+        return r1, false
+    end
+
+    -- Stage 5: full-text search fallback (catches dab-page tops like
+    -- 三体 → 三體 with no content, where search resolves 三体 (小说)).
+    local s = self:fetchCandidates(q0, engine, lang, "search")
+    if s and #s > 0 then
+        return s, false
+    end
+
+    -- Stage 6: surface whatever prefix noise we had (better than nothing).
+    if r1 and #r1 > 0 then
+        return r1, false
+    end
+    if r2 and #r2 > 0 then
+        return r2, false
+    end
+
+    return nil, false
+end
+
+function DualWiki:lookup(word, engine, word_boxes, lang, want_full)
     if not word or word == "" then return end
 
-    if NetworkMgr:willRerunWhenOnline(function() self:lookup(word, engine, word_boxes, lang) end) then
+    if NetworkMgr:willRerunWhenOnline(function()
+        self:lookup(word, engine, word_boxes, lang, want_full)
+    end) then
         return
     end
 
@@ -212,28 +538,49 @@ function DualWiki:lookup(word, engine, word_boxes, lang)
         if not self.ui or not self.ui.dialog then
             return
         end
-        local ok, title_res, def_res = pcall(function()
-            if is_wiki then
-                return self:fetchWikipedia(word, lang)
-            else
-                return self:fetchMoegirl(word)
+        local ok, cands, is_full = pcall(function()
+            if want_full then
+                return self:fetchDirect(word, engine, lang), true
             end
+            local result, full_flag = self:queryPipeline(word, engine, lang)
+            return result, full_flag
         end)
 
         UIManager:close(progress_info)
 
-        if ok and title_res and def_res and #def_res > 0 then
-            self:showResult(word, title_res, def_res, engine, word_boxes, lang)
+        if ok and type(cands) == "table" and #cands > 0 then
+            self:showResult(word, cands, engine, word_boxes, lang, want_full or is_full)
         else
             self:showRetryDialog(word, engine, word_boxes, lang)
         end
     end)
 end
 
-function DualWiki:showResult(word, definition_title, definition, engine, word_boxes, lang)
+function DualWiki:showResult(word, cands, engine, word_boxes, lang, is_full)
     local self_ref = self
     local is_moegirl = (engine == "moegirl")
     local dict_name = is_moegirl and "萌娘百科" or string.format("维基百科 (%s)", (lang or "ZH"):upper())
+
+    self._last_candidate_titles = {}
+    self._last_was_full = is_full and true or false
+
+    local results = {}
+    for i, cand in ipairs(cands) do
+        self._last_candidate_titles[cand.title] = true
+        local definition
+        if cand.extract and #cand.extract > 0 then
+            definition = cleanWikiExtract(cand.extract)
+        else
+            definition = "（前缀候选：暂无内容摘要。长按右上角铅笔图标可编辑并载入本词条完整正文。）"
+        end
+        results[i] = {
+            word = cand.title,
+            definition = definition,
+            dictionary = dict_name,
+            lang = lang or "zh",
+            rtl_lang = false,
+        }
+    end
 
     local window
     window = DictQuickLookup:new{
@@ -242,13 +589,7 @@ function DualWiki:showResult(word, definition_title, definition, engine, word_bo
         dialog = self.dialog,
         word = word,
         word_boxes = word_boxes,
-        results = { {
-            word = definition_title,
-            definition = definition,
-            dictionary = dict_name,
-            lang = lang or "zh",
-            rtl_lang = false,
-        } },
+        results = results,
         -- Verified by Codex: is_wiki=false decouples from core ReaderWikipedia private methods
         is_wiki = false,
         -- Pencil icon routes through the native DictQuickLookup:onLookupInputWord()
@@ -256,6 +597,8 @@ function DualWiki:showResult(word, definition_title, definition, engine, word_bo
         -- (window, hint, ev) shape. On keyboard-enabled devices the same name
         -- can be dispatched as an event handler where `hint` is the key event
         -- table, so only forward real strings.
+        -- Single tap prefills the original selection; long-press prefills the
+        -- currently viewed candidate (self.lookupword updates on switch).
         onLookupInputWord = function(dlg, hint, ev)
             if type(hint) ~= "string" then
                 hint = nil
@@ -315,124 +658,6 @@ function DualWiki:showRetryDialog(failed_word, engine, word_boxes, lang)
     }
     UIManager:show(retry_dialog)
     retry_dialog:onShowKeyboard()
-end
-
-function DualWiki:fetchMoegirl(word)
-    local esc_word = socket_url.escape(word)
-
-    -- Step 1: Direct title query with explaintext=1 & full article
-    local direct_url = MOEGIRL_BASE .. "?action=query&prop=extracts&explaintext=1&redirects=1&titles=" .. esc_word .. "&format=json"
-    local ok, body = httpGet(direct_url, 10)
-    if ok and body then
-        local ok_json, data = pcall(JSON.decode, body)
-        if ok_json and data and data.query and data.query.pages then
-            for pid, page in pairs(data.query.pages) do
-                if pid ~= "-1" and not page.missing and page.extract and #page.extract > 0 then
-                    return page.title or word, cleanWikiExtract(page.extract)
-                end
-            end
-        end
-    end
-
-    -- Step 2: Fallback search if direct title miss
-    local search_url = MOEGIRL_BASE .. "?action=query&generator=search&gsrsearch=" .. esc_word .. "&prop=extracts&explaintext=1&gsrlimit=3&format=json"
-    local ok_s, body_s = httpGet(search_url, 10)
-    if ok_s and body_s then
-        local ok_sjson, sdata = pcall(JSON.decode, body_s)
-        if ok_sjson and sdata and sdata.query and sdata.query.pages then
-            local sorted_pages = {}
-            for pid, page in pairs(sdata.query.pages) do
-                table.insert(sorted_pages, page)
-            end
-            table.sort(sorted_pages, function(a, b)
-                return (a.index or 999) < (b.index or 999)
-            end)
-            for _, page in ipairs(sorted_pages) do
-                if page.extract and #page.extract > 0 then
-                    return page.title or word, cleanWikiExtract(page.extract)
-                end
-            end
-            if #sorted_pages > 0 and sorted_pages[1].title then
-                local top_title = sorted_pages[1].title
-                local top_url = MOEGIRL_BASE .. "?action=query&prop=extracts&explaintext=1&redirects=1&titles=" .. socket_url.escape(top_title) .. "&format=json"
-                local ok_t, body_t = httpGet(top_url, 10)
-                if ok_t and body_t then
-                    local ok_tjson, tdata = pcall(JSON.decode, body_t)
-                    if ok_tjson and tdata and tdata.query and tdata.query.pages then
-                        for pid, page in pairs(tdata.query.pages) do
-                            if pid ~= "-1" and not page.missing and page.extract and #page.extract > 0 then
-                                return page.title or top_title, cleanWikiExtract(page.extract)
-                            end
-                        end
-                    end
-                end
-            end
-        end
-    end
-
-    return nil, nil
-end
-
-function DualWiki:fetchWikipedia(word, lang)
-    lang = lang or "zh"
-    local esc_word = socket_url.escape(word)
-
-    -- Step 1: Direct title query with explaintext=1 & full article
-    local direct_url = string.format("https://%s.wikipedia.org/w/api.php?action=query&prop=extracts&explaintext=1&redirects=1&titles=%s&format=json", lang, esc_word)
-    local ok, body = httpGet(direct_url, 10)
-    if ok and body then
-        local ok_json, data = pcall(JSON.decode, body)
-        if ok_json and data and data.query and data.query.pages then
-            for pid, page in pairs(data.query.pages) do
-                if pid ~= "-1" and not page.missing and page.extract and #page.extract > 0 then
-                    return page.title or word, cleanWikiExtract(page.extract)
-                end
-            end
-        end
-    end
-
-    -- Step 2: Fallback search if direct title miss
-    local search_url = string.format("https://%s.wikipedia.org/w/api.php?action=query&generator=search&gsrsearch=%s&prop=extracts&explaintext=1&gsrlimit=3&format=json", lang, esc_word)
-    local ok_s, body_s = httpGet(search_url, 10)
-    if ok_s and body_s then
-        local ok_sjson, sdata = pcall(JSON.decode, body_s)
-        if ok_sjson and sdata and sdata.query and sdata.query.pages then
-            local sorted_pages = {}
-            for pid, page in pairs(sdata.query.pages) do
-                table.insert(sorted_pages, page)
-            end
-            table.sort(sorted_pages, function(a, b)
-                return (a.index or 999) < (b.index or 999)
-            end)
-            for _, page in ipairs(sorted_pages) do
-                if page.extract and #page.extract > 0 then
-                    return page.title or word, cleanWikiExtract(page.extract)
-                end
-            end
-            if #sorted_pages > 0 and sorted_pages[1].title then
-                local top_title = sorted_pages[1].title
-                local top_url = string.format("https://%s.wikipedia.org/w/api.php?action=query&prop=extracts&explaintext=1&redirects=1&titles=%s&format=json", lang, socket_url.escape(top_title))
-                local ok_t, body_t = httpGet(top_url, 10)
-                if ok_t and body_t then
-                    local ok_tjson, tdata = pcall(JSON.decode, body_t)
-                    if ok_tjson and tdata and tdata.query and tdata.query.pages then
-                        for pid, page in pairs(tdata.query.pages) do
-                            if pid ~= "-1" and not page.missing and page.extract and #page.extract > 0 then
-                                return page.title or top_title, cleanWikiExtract(page.extract)
-                            end
-                        end
-                    end
-                end
-            end
-        end
-    end
-
-    -- Step 3: English fallback if zh had no results and query is purely Latin characters
-    if lang == "zh" and word:match("^[%a%s%-%d%p]+$") then
-        return self:fetchWikipedia(word, "en")
-    end
-
-    return nil, nil
 end
 
 return DualWiki
