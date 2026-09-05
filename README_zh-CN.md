@@ -28,7 +28,7 @@ KOReader 电子墨水屏阅读器的百科查询插件，支持维基百科（`z
 
 ## 安装
 
-可通过 KOReader AppStore（`appstore.koplugin`）安装，或在 [Releases](../../releases) 页面下载 `koreader-dual-wiki-v1.2.1.zip` 解压到 `koreader/plugins/`：
+可通过 KOReader AppStore（`appstore.koplugin`）安装，或在 [Releases](../../releases) 页面下载 `koreader-dual-wiki-v1.2.2.zip` 解压到 `koreader/plugins/`：
 
 ```text
 koreader/

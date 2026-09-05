@@ -98,7 +98,7 @@ local MAX_RESPONSE_BYTES = 2 * 1024 * 1024
 -- v1.2.1 (M1-A3): device-agnostic User-Agent. The old hard-coded
 -- "KOReader/2024.04 (Kindle)" misrepresented every device as a Kindle and
 -- skewed per-platform statistics. Bump alongside _meta.lua on release.
-local PLUGIN_VERSION = "1.2.1"
+local PLUGIN_VERSION = "1.2.2"
 local USER_AGENT = "dual_wiki.koplugin/" .. PLUGIN_VERSION .. " (KOReader)"
 
 -- Retrieval pipeline tuning
@@ -408,7 +408,23 @@ local ENGINES = {
 local function httpGet(url, timeout)
     local transport = socket_url.parse(url).scheme == "https" and https or http
     socketutil:set_timeout(timeout or 6, 12)
+    -- v1.2.2 fix: size-capped sink. ltn12.sink.table buffered the ENTIRE
+    -- body (potentially multi-MB on Fandom parse) and only rejected it
+    -- afterwards, so the "2 MB cap" never actually protected low-RAM
+    -- devices. This sink aborts the transfer the moment the cap is crossed.
     local sink = {}
+    local received, overflow = 0, false
+    local capped_sink = function(chunk)
+        if chunk then
+            received = received + #chunk
+            if received > MAX_RESPONSE_BYTES then
+                overflow = true
+                return nil, "response exceeds 2 MB cap"
+            end
+            table.insert(sink, chunk)
+        end
+        return true
+    end
     local code, headers, status
     local req_ok, req_err = pcall(function()
         code, headers, status = socket.skip(1, transport.request({
@@ -418,10 +434,13 @@ local function httpGet(url, timeout)
                 ["User-Agent"] = USER_AGENT,
                 ["Accept"] = "application/json",
             },
-            sink = ltn12.sink.table(sink),
+            sink = capped_sink,
         }))
     end)
     socketutil:reset_timeout()
+    if overflow then
+        return false, "too_large", "Response exceeds the 2 MB cap"
+    end
     if not req_ok then
         local msg = tostring(req_err or ""):lower()
         if msg:find("timeout") then
@@ -430,9 +449,11 @@ local function httpGet(url, timeout)
         return false, "error", req_err
     end
     local content = table.concat(sink)
-    if type(code) == "number" and code >= 200 and code < 300 and content and #content > 0 then
-        if #content > MAX_RESPONSE_BYTES then
-            return false, "http_5xx", "Response too large"
+    if type(code) == "number" and code >= 200 and code < 300 then
+        if #content == 0 then
+            -- v1.2.2 fix: a 200 with an empty body is a transport-level
+            -- truncation, not an HTTP status error.
+            return false, "error", "Empty response body"
         end
         return true, content
     end
@@ -502,7 +523,13 @@ end
 function DualWiki:_defaultFandomSub()
     if G_reader_settings then
         local sub = G_reader_settings:readSetting("dualwiki_fandom_community")
-        if sub and sub ~= "" then return sub end
+        if sub and sub ~= "" then
+            -- v1.2.2: defensive normalization — fandom subdomains are
+            -- lowercase alphanumeric + hyphen; strip anything else so a
+            -- stray setting value can't produce a malformed URL.
+            sub = tostring(sub):lower():gsub("[^%a%d%-]", "")
+            if sub ~= "" then return sub end
+        end
     end
     return "starwars"
 end
@@ -824,11 +851,12 @@ end
 -- self-diagnose (rate limited vs offline vs slow site) instead of seeing a
 -- generic "network error".
 local ERROR_HINTS = {
-    http_429 = _("Rate limited by the wiki server. Wait a minute and retry."),
-    http_4xx = _("The wiki server rejected the request."),
-    http_5xx = _("The wiki server is having trouble. Retry later."),
-    timeout  = _("The request timed out."),
-    error    = _("The site may be unreachable or blocked on this network."),
+    http_429    = _("Rate limited by the wiki server. Wait a minute and retry."),
+    http_4xx    = _("The wiki server rejected the request."),
+    http_5xx    = _("The wiki server is having trouble. Retry later."),
+    timeout     = _("The request timed out."),
+    error       = _("The site may be unreachable or blocked on this network."),
+    too_large   = _("The article is too large to display on this device."),
 }
 
 -- Degradation ladder (each step is a single merged request):
@@ -931,6 +959,11 @@ function DualWiki:lookup(word, engine, word_boxes, lang, want_full)
         return
     end
 
+    -- v1.2.2 fix: clear the previous round's transport error kind here (not
+    -- only on display), otherwise a stale "timeout" hint from an earlier
+    -- failed query would be attached to a later zero-hit "not found" dialog.
+    self._last_error_kind = nil
+
     local prompt_title = string.format("%s · %s", _("Querying"), cfg.label(lang))
         .. LF .. word
 
@@ -1030,24 +1063,28 @@ function DualWiki:showRetryDialog(failed_word, engine, word_boxes, lang)
     if not cfg then return end
     local target = cfg.switchTarget and cfg.switchTarget()
     local target_cfg = target and ENGINES[target]
+    -- v1.2.2 fix: normalize the language for BOTH the switch button label and
+    -- the actual re-lookup. Previously the label used a ja/en/zh-normalized
+    -- value while the lookup call passed the raw lang through — a Fandom
+    -- failure switching to Wikipedia sent "starwars" as a language and
+    -- queried the nonexistent starwars.wikipedia.org.
+    local switch_lang = (lang == "ja" or lang == "en") and lang or "zh"
     local switch_btn_text = target_cfg and string.format("%s → %s", _("Switch to"), target_cfg.label(
-        target == "wikipedia" and (lang == "ja" and "ja" or lang == "en" and "en" or "zh") or "zh"
+        switch_lang
     )) or _("Retry")
 
-    -- v1.2.1 (M1-A4): surface the transport failure kind so the user can
-    -- self-diagnose (rate limit vs offline vs unreachable site).
+    -- v1.2.2 fix: surface the transport failure kind via the dialog's
+    -- description (title-bar info line). The previous immediate InfoMessage
+    -- was hidden behind this dialog's fullscreen tap layer, so users never
+    -- saw it.
     local kind = self._last_error_kind
-    if kind and ERROR_HINTS[kind] then
-        UIManager:show(InfoMessage:new{
-            text = cfg.label(lang) .. LF .. ERROR_HINTS[kind],
-            timeout = 4,
-        })
-        self._last_error_kind = nil
-    end
+    local error_description = kind and ERROR_HINTS[kind] or nil
+    self._last_error_kind = nil
 
     local retry_dialog
     retry_dialog = InputDialog:new{
         title = string.format("%s · %s", cfg.label(lang), _("Not found, modify and retry:")),
+        description = error_description,
         input = failed_word,
         input_type = "text",
         buttons = {
@@ -1065,8 +1102,7 @@ function DualWiki:showRetryDialog(failed_word, engine, word_boxes, lang)
                         local query = retry_dialog:getInputText()
                         UIManager:close(retry_dialog)
                         if query and query ~= "" then
-                            self:lookup(query, target or "wikipedia", word_boxes,
-                                target == "wikipedia" and lang or "zh")
+                            self:lookup(query, target or "wikipedia", word_boxes, switch_lang)
                         end
                     end,
                 },

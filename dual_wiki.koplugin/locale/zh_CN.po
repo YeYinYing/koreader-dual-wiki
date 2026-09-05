@@ -74,3 +74,6 @@ msgstr "请求超时。"
 msgid "The site may be unreachable or blocked on this network."
 msgstr "该站点可能无法连通，或被当前网络拦截。"
 
+msgid "The article is too large to display on this device."
+msgstr "该词条过长，无法在本设备上完整显示。"
+

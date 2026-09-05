@@ -76,3 +76,6 @@ msgstr ""
 msgid "The site may be unreachable or blocked on this network."
 msgstr ""
 
+msgid "The article is too large to display on this device."
+msgstr ""
+

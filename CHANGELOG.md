@@ -1,5 +1,15 @@
 # Changelog
 
+## [1.2.2] - 2026-09-05
+
+### Fixed
+
+- The retry dialog's cross-engine button now passes a normalized language to the new lookup; a failed Fandom query switching to Wikipedia previously sent the Fandom community subdomain as a language and queried a nonexistent `starwars.wikipedia.org`.
+- The transport error hint moved from a transient toast (hidden behind the retry dialog's tap layer, therefore never visible) into the retry dialog's own description line, and is now cleared once consumed or when a new query starts, so stale hints can no longer leak into later "not found" dialogs.
+- The 2 MB response cap now aborts the transfer as soon as the limit is crossed via a size-capped sink; previously the whole multi-megabyte body was buffered first (defeating the cap on low-RAM devices) and the overflow was misreported as a server error instead of "article too large".
+- A 200 response with an empty body is now reported as a transport error rather than a generic HTTP status failure.
+- The Fandom community setting value is normalized (lowercase alphanumeric + hyphen) before being used in URLs.
+
 ## [1.2.1] - 2026-09-05
 
 ### Fixed

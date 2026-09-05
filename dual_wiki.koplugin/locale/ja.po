@@ -74,3 +74,6 @@ msgstr "リクエストがタイムアウトしました。"
 msgid "The site may be unreachable or blocked on this network."
 msgstr "このサイトに接続できないか、現在のネットワークでブロックされている可能性があります。"
 
+msgid "The article is too large to display on this device."
+msgstr "この項目は長すぎるため、この端末では表示できません。"
+
