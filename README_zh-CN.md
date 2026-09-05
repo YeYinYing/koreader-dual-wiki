@@ -60,6 +60,12 @@ koreader/
 - KOReader v2024 及以上版本。
 - 除 KOReader 自带的 Lua 环境外，不依赖额外运行时组件。
 
+## 发布与上游边界
+
+- 本插件已收录进 KOReader 官方插件仓库（[koreader/contrib](https://github.com/koreader/contrib)），官方 AppStore 直连本仓库的 GitHub Releases 自动检测并推送更新。
+- 日常迭代、Bug 修复与小版本（v1.3.1、v1.3.2…）一律只在本仓库发布 commit / tag / Release，**不向上游发起 PR**；子模块指针允许滞后于个人 Release，不影响用户更新。
+- 仅在跨代重大版本（如 v2.0.0）且作者明确决策时，才向 `koreader/contrib` 提交指针更新 PR。
+
 ## 许可证
 
 GNU Affero General Public License v3.0（AGPL-3.0）。

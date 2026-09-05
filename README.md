@@ -60,6 +60,12 @@ Restart KOReader after installation.
 - KOReader v2024+.
 - No runtime dependencies beyond KOReader's built-in Lua environment.
 
+## Release & upstream boundary
+
+- The plugin is included in the official KOReader plugin repository ([koreader/contrib](https://github.com/koreader/contrib)); the official AppStore polls this repo's GitHub Releases directly and auto-pushes updates to users.
+- Routine development, bug fixes, and minor versions (v1.3.1, v1.3.2, …) are released exclusively in this repository — no upstream PRs. The contrib submodule pointer may lag personal releases without affecting user updates.
+- Only a cross-generation major version (e.g. v2.0.0), at the author's explicit decision, warrants a pointer-bump PR to `koreader/contrib`.
+
 ## License
 
 GNU Affero General Public License v3.0 (AGPL-3.0).
