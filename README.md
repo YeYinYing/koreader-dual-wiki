@@ -10,72 +10,122 @@
 
 </div>
 
-**Dual Wiki** is a zero-delay, multi-engine encyclopedia lookup plugin for **KOReader** e-ink readers (Kindle, Kobo, Onyx Boox, Android).
+Dual Wiki is a KOReader plugin for looking up encyclopedia entries from multiple MediaWiki-based sources while reading.
+It is designed for e-ink devices and prioritizes predictable behavior, low memory usage, and minimal UI disruption.
 
-It integrates **Moegirlpedia** — the wiki dedicated to anime, manga, gaming lore and internet culture — with a modernized, plain-text-streaming **Wikipedia** engine, plus **Fandom** community wikis for western pop culture (Star Wars, Genshin Impact, and more).
+Supported sources:
 
----
-
-## 🌟 Key Features
-
-1. **Fuzzy-Tolerant Smart Retrieval (Plan A)**
-   - No more "select the exact keyword or fail" — outer book-title quotes, CJK brackets and stray punctuation are stripped locally in 0 ms, while typo-short selections auto-complete via server prefix search.
-   - **Single merged request** returns up to 4 ranked candidates, each with a readable intro summary — 8/10 typical queries resolve in exactly one HTTP round-trip on 2.4 GHz Kindle Wi-Fi.
-   - Confirming a candidate via the pencil icon upgrades the summary to the full article; candidates switch natively with the built-in left/right chevrons (zero custom UI).
-2. **Multi-Engine Matrix (Phase 2)**
-   - **Wikipedia (ZH / EN / JA)** — general knowledge in the language of the book being read.
-   - **Moegirlpedia** — ACG / anime / gaming / internet culture (spoiler-revealed).
-   - **Fandom** — Star Wars, Genshin Impact and 380k+ western pop-culture wikis (full articles via `action=parse`, since Fandom ships no TextExtracts).
-   - **Context-aware routing**: the plugin reads the current book's `doc_props.language` and surfaces the matching button pair; an optional language lock overrides detection from the KOReader settings menu.
-3. **Language-Aware Fuzzy Retrieval**
-   - Trailing-particle stripping is now language-aware: Chinese (12 particles), Japanese (の / に / を / は / が / で …) and English (possessive `'s` only — plural `s` is deliberately never stripped, so `physics` never becomes `physic`).
-   - Latin queries match on word boundaries (`quantum` → `Quantum mechanics`), never on arbitrary byte prefixes (`wo` does not hijack `Wookieepedia`).
-   - Japanese-book misses on the zh-only Moegirlpedia auto-fallback to `ja.wikipedia` (`シャナの` → 灼眼のシャナ).
-4. **Spoiler Bar Revelation (Heimu)**
-   - Moegirlpedia's signature `#252525` black spoiler bars are a pure CSS effect. Because the pipeline uses the MediaWiki `explaintext=1` plain-text mode, they never reach the display layer — covered text is always fully readable, with no solid black blocks on e-ink.
-5. **Traditional / Simplified Chinese Alignment**
-   - Server-side `converttitles=1` handles variant conversion — selecting `駭客任務` from a Traditional-Chinese book resolves automatically. No local conversion dictionary, no extra memory.
-6. **Book-grade Typography**
-   - MediaWiki markup headings (`== Chapter ==`, `=== Sub-section ===`) are automatically converted into elegant **`【Chapter】`** and **`▸ Sub-section`** lines.
-7. **gettext Internationalization**
-   - All user-facing strings are wrapped and translated via bundled `locale/*.po` + compiled `*.mo` files (zh_CN / zh_TW / ja), loaded at startup for the active KOReader UI language.
-8. **Cross-Engine Switching & Keyword Calibration**
-   - When a query misses, a pre-filled retry dialog appears with **one-tap switching** to the other engine.
-   - The native pencil icon in the lookup window opens a pre-filled edit dialog for trimming stray punctuation and re-querying.
+- Wikipedia in `zh / en / ja`
+- Moegirlpedia
+- Fandom community wikis
 
 ---
 
-## 📦 Installation
+## Overview
 
-### Option A: KOReader AppStore (recommended)
-Open `appstore.koplugin` on your device, search for **Dual Wiki**, and install.
+The plugin provides a small set of focused lookup flows:
 
-### Option B: Manual Installation
-1. Download the latest `koreader-dual-wiki-v1.2.0.zip` from the [Releases](../../releases) page.
-2. Connect your reader to a computer, then copy the extracted `dual_wiki.koplugin` folder into the device's `koreader/plugins/` directory:
-   ```text
-   koreader/
-   └── plugins/
-       └── dual_wiki.koplugin/
-           ├── _meta.lua
-           ├── main.lua
-           └── locale/
-               ├── ja/LC_MESSAGES/dual_wiki.mo
-               ├── zh_CN/LC_MESSAGES/dual_wiki.mo
-               └── zh_TW/LC_MESSAGES/dual_wiki.mo
-   ```
-3. Restart KOReader.
+- select text and open a source from the highlight toolbar;
+- search by typing directly from the main menu;
+- review ranked candidates when the exact title is not known;
+- open the pencil edit action to refine a query or load the full article.
+
+The retrieval pipeline is intentionally conservative. It removes only outer wrappers and other safe noise, keeps in-word punctuation intact, and falls back gradually when a query is ambiguous or incomplete.
 
 ---
 
-## ⚙️ Architecture & Compatibility
+## Features
 
-- **Upstream-standard**: 100% aligned with current KOReader (v2024+) plugin guidelines; `_meta.lua` ships only `fullname` / `description` / `version` (no deprecated keys), designed for AppStore upgrade comparison.
-- **Decoupled lookup window**: result windows explicitly use `is_wiki = false`, fully decoupled from the core `ReaderWikipedia` private methods and language handling.
-- **Hardware-verified**: deeply tested on a Kindle Paperwhite 3 (i.MX6SL, 512 MB RAM) — zero resident memory footprint, resilient on weak networks (2 MB response cap, stale-UI callback guards).
+### Retrieval behavior
+- Removes only outer wrappers such as `《》`, `“”`, `【】`, `『』`, and similar pairs.
+- Trims safe trailing particles conservatively.
+- Uses word-boundary matching for Latin queries.
+- Returns ranked candidates with summaries on the main path when the source supports it.
+- Upgrades a candidate to the full article from the pencil edit action.
+
+### Source handling
+- Wikipedia is routed per language (`zh`, `en`, `ja`).
+- Moegirlpedia is used as a separate source for ACG-related entries.
+- Fandom is supported through its MediaWiki API, with full-article retrieval handled through `action=parse`.
+- `converttitles=1` is enabled only for Wikipedia Chinese queries.
+
+### Language-aware routing
+- KOReader book metadata is used when available to determine the preferred language.
+- The plugin can also be pinned to a specific language from settings.
+- Japanese Moegirlpedia misses can fall back to `ja.wikipedia` when a result is not reliable.
+
+### Localization
+- Bundled translation files are provided for `zh_CN`, `zh_TW`, and `ja`.
+- User-facing strings are wrapped with gettext.
+- Locale files are loaded at startup for the active KOReader UI language.
+
+### Runtime constraints
+- Response bodies are capped at 2 MB.
+- Network timeouts are reset explicitly after each request.
+- Stale UI callbacks are guarded to avoid showing results after the reader view has changed.
 
 ---
 
-## 📄 License
+## Installation
 
-Released under the **GNU Affero General Public License v3.0 (AGPL-3.0)**, consistent with the KOReader ecosystem.
+### KOReader AppStore
+Search for **Dual Wiki** in `appstore.koplugin` and install it.
+
+### Manual installation
+1. Download `koreader-dual-wiki-v1.2.0.zip` from the [Releases](../../releases) page.
+2. Extract the archive.
+3. Copy `dual_wiki.koplugin` into your device's `koreader/plugins/` directory.
+4. Restart KOReader.
+
+Expected directory layout:
+
+```text
+koreader/
+└── plugins/
+    └── dual_wiki.koplugin/
+        ├── _meta.lua
+        ├── main.lua
+        └── locale/
+            ├── messages.pot
+            ├── ja.po
+            ├── zh_CN.po
+            ├── zh_TW.po
+            ├── ja/LC_MESSAGES/dual_wiki.mo
+            ├── zh_CN/LC_MESSAGES/dual_wiki.mo
+            └── zh_TW/LC_MESSAGES/dual_wiki.mo
+```
+
+---
+
+## Usage
+
+### From selected text
+1. Select a word or phrase.
+2. Open the highlight toolbar.
+3. Choose the appropriate source button.
+4. Use the candidate list to switch entries or refine the query.
+5. Use the pencil icon to edit the current query or load the full article.
+
+### From the main menu
+The plugin also provides direct search entries for each supported source.
+
+---
+
+## Compatibility
+
+- KOReader v2024 or newer.
+- Designed for Kindle-class e-ink devices and similar low-resource readers.
+- No runtime dependencies beyond KOReader's built-in Lua environment.
+
+---
+
+## Release notes
+
+- Current version: `v1.2.0`
+- Main additions in this release: language-aware retrieval, multi-engine routing, gettext localization, Fandom support, and Japanese Moegirlpedia fallback.
+
+---
+
+## License
+
+Released under the **GNU Affero General Public License v3.0 (AGPL-3.0)**.
