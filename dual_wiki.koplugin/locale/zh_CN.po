@@ -44,8 +44,8 @@ msgstr "取消"
 msgid "Search"
 msgstr "查询"
 
-msgid "Candidate match: press and hold the pencil icon to load the full article."
-msgstr "（候选词条：长按右上角铅笔图标可载入本词条完整正文。）"
+msgid "Candidate match. Tap the pencil icon at the top right to load the full article."
+msgstr "（候选词条：点右上角铅笔图标载入本词条完整正文。）"
 
 msgid "Querying"
 msgstr "正在查询"

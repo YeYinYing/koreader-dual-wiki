@@ -740,9 +740,16 @@ end
 -- Normalizes common KOReader codes (zh_CN / zh-Hant / ja / ja_JP…) to the
 -- bundled locale directory names.
 function DualWiki:_loadPluginLocale()
-    if not G_reader_settings then return end
-    local lang = G_reader_settings:readSetting("language")
-    if not lang or lang == "" then return end
+    local lang = G_reader_settings and G_reader_settings:readSetting("language")
+    if not lang or lang == "" then
+        -- v1.3.2: KOReader follows the host environment (LANG/LC_ALL) until
+        -- the user picks a language in the menu — settings then has no
+        -- "language" key while the UI is still translated (GetText probes
+        -- the environment at startup). Mirror the effective core language
+        -- so the plugin is never left untranslated in that state.
+        lang = GetText.current_lang
+        if not lang or lang == "" or lang == "C" then return end
+    end
     if lang:match("^en") or lang:match("^C") then return end
     lang = lang:gsub("%.utf8$", ""):gsub("%.UTF%-8$", "")
     local base, script = lang:match("^([a-zA-Z]+)[_%-]([a-zA-Z]+)$")
@@ -1421,7 +1428,9 @@ function DualWiki:showResult(word, cands, engine, word_boxes, lang, is_full)
         if cand.extract and #cand.extract > 0 then
             definition = cleanWikiExtract(cand.extract)
         else
-            definition = _("Candidate match: press and hold the pencil icon to load the full article.")
+            -- v1.3.2: clearer wording — the pencil is a tap, not a hold,
+            -- and "top right" pins its location (user-acceptance finding).
+            definition = _("Candidate match. Tap the pencil icon at the top right to load the full article.")
         end
         results[i] = {
             word = cand.title,

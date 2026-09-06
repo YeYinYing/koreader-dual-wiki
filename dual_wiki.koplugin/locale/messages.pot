@@ -46,7 +46,7 @@ msgstr ""
 msgid "Search"
 msgstr ""
 
-msgid "Candidate match: press and hold the pencil icon to load the full article."
+msgid "Candidate match. Tap the pencil icon at the top right to load the full article."
 msgstr ""
 
 msgid "Querying"

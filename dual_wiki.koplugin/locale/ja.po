@@ -44,8 +44,8 @@ msgstr "キャンセル"
 msgid "Search"
 msgstr "検索"
 
-msgid "Candidate match: press and hold the pencil icon to load the full article."
-msgstr "（候補項目：鉛筆アイコンを長押しすると全文を読み込みます。）"
+msgid "Candidate match. Tap the pencil icon at the top right to load the full article."
+msgstr "（候補語：右上の鉛筆アイコンをタップすると完全な本文を読み込みます。）"
 
 msgid "Querying"
 msgstr "照会中"

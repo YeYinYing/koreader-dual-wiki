@@ -122,8 +122,8 @@ msgstr "Cancel"
 msgid "Search"
 msgstr "Search"
 
-msgid "Candidate match: press and hold the pencil icon to load the full article."
-msgstr "Candidate match: press and hold the pencil icon to load the full article."
+msgid "Candidate match. Tap the pencil icon at the top right to load the full article."
+msgstr "Candidate match. Tap the pencil icon at the top right to load the full article."
 
 msgid "Querying"
 msgstr "Querying"
