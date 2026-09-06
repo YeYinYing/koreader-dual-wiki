@@ -1,5 +1,19 @@
 # Changelog
 
+## [1.3.1] - 2026-09-06
+
+### Added
+
+- **Automatic 429/5xx retry** (polish-phase item, driven by emulator integration findings): transient server-side failures now retry once with a bounded backoff instead of surfacing a "rate limited" dialog. The Wikimedia rate limiter counts per-IP across all wikis, so rapid successive lookups could legitimately hit 429 mid-session. `Retry-After` is honored when present (capped at 5 s; default backoff 2 s). Non-retryable kinds (timeout, DNS/TLS errors, oversized bodies) still fail fast — the moegirl degradation ladder is unaffected.
+
+### Fixed
+
+- **Latent gettext corruption** caught by the new integration probe before release: the transport layer assigned luasocket's response headers table to the module-level gettext `_` upvalue (`code, _, status = socket.skip(1, ...)`), which would have broken every subsequent user-facing string evaluation after the first HTTP request of a session. All previously released versions (v1.2.0 – v1.3.0) used the correct binding and were **not** affected; the regression existed only in unreleased working-tree code and was intercepted by the emulator probe.
+
+### Infrastructure
+
+- Integration suite gained two deterministic stubbed-transport cases proving the retry layer: one 429 → success (exactly 2 requests, `Retry-After: 0` honored), persistent 429 → nil with kind `http_429` after exactly 2 requests.
+
 ## [1.3.0] - 2026-09-06
 
 ### Added

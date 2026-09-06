@@ -60,7 +60,6 @@ local WidgetContainer = require("ui/widget/container/widgetcontainer")
 local JSON = require("json")
 local http = require("socket.http")
 local https = require("ssl.https")
-local ltn12 = require("ltn12")
 local socket = require("socket")
 local socketutil = require("socketutil")
 local socket_url = require("socket.url")
@@ -88,7 +87,7 @@ local MAX_RESPONSE_BYTES = 2 * 1024 * 1024
 -- v1.2.1 (M1-A3): device-agnostic User-Agent. The old hard-coded
 -- "KOReader/2024.04 (Kindle)" misrepresented every device as a Kindle and
 -- skewed per-platform statistics. Bump alongside _meta.lua on release.
-local PLUGIN_VERSION = "1.3.0"
+local PLUGIN_VERSION = "1.3.1"
 local USER_AGENT = "dual_wiki.koplugin/" .. PLUGIN_VERSION .. " (KOReader)"
 
 -- Retrieval pipeline tuning
@@ -153,8 +152,14 @@ local ZERO_WIDTH = { "\226\128\139", "\226\128\140", "\226\128\141", "\239\187\1
 -- Wrapper brackets eligible for stripping. CJK only for unmatched-side
 -- stripping: ASCII ( ) " ' are legal in-word characters ((G)I-DLE, 1") and
 -- must never be touched.
-local OPEN_WRAPPERS = { ["《"] = "》", ["「"] = "」", ["『"] = "』", ["【"] = "】", ["［"] = "］", ["（"] = "）", ["〈"] = "〉", ["〔"] = "〕", ["“"] = "”", ["‘"] = "’", ["«"] = "»" }
-local CLOSE_WRAPPERS = { ["》"] = true, ["」"] = true, ["』"] = true, ["】"] = true, ["］"] = true, ["）"] = true, ["〉"] = true, ["〕"] = true, ["”"] = true, ["’"] = true, ["»"] = true }
+local OPEN_WRAPPERS = {
+    ["《"] = "》", ["「"] = "」", ["『"] = "』", ["【"] = "】", ["［"] = "］",
+    ["（"] = "）", ["〈"] = "〉", ["〔"] = "〕", ["“"] = "”", ["‘"] = "’", ["«"] = "»",
+}
+local CLOSE_WRAPPERS = {
+    ["》"] = true, ["」"] = true, ["』"] = true, ["】"] = true, ["］"] = true,
+    ["）"] = true, ["〉"] = true, ["〕"] = true, ["”"] = true, ["’"] = true, ["»"] = true,
+}
 
 -- Stage-1 sanitation: wrapper brackets + zero-width noise + whitespace.
 -- Audit rule (mishit guard): only the OUTERMOST pairing is stripped, never
@@ -445,7 +450,18 @@ local ENGINES = {
 --   "http_4xx"/"http_5xx"  other HTTP statuses
 --   "timeout"   socket timeout
 --   "error"     transport failure (DNS / refused / TLS)
-local function httpGet(url, timeout)
+local HTTP_RETRY_BACKOFF_S = 2
+local HTTP_RETRY_CAP_S = 5
+local HTTP_RETRIES = 1
+
+-- v1.3.1: automatic bounded retry for transient server-side conditions.
+-- Empirically (emu integration suite): the Wikimedia rate limiter counts
+-- per-IP across ALL wikis, so rapid successive lookups can legitimately
+-- hit 429. Retry once with a short backoff (honor Retry-After up to 5 s,
+-- else 2 s). Unreachable hosts / TLS / timeouts still fail fast — the
+-- moegirl degradation ladder depends on it, and error/timeout kinds are
+-- not retried.
+local function httpGetOnce(url, timeout)
     local transport = socket_url.parse(url).scheme == "https" and https or http
     socketutil:set_timeout(timeout or 6, 12)
     -- v1.2.2 fix: size-capped sink. ltn12.sink.table buffered the ENTIRE
@@ -467,6 +483,12 @@ local function httpGet(url, timeout)
     end
     local code, headers, status
     local req_ok, req_err = pcall(function()
+        -- socket.skip(1, ...) drops the leading "1" that luasocket's
+        -- generic request form prepends, yielding (code, headers, status).
+        -- NOTE: the middle value is the headers table — it MUST be bound to
+        -- a dedicated variable, never to the module-level `_` (gettext);
+        -- a previous version assigned it to `_`, silently corrupting the
+        -- translation function after the very first HTTP request.
         code, headers, status = socket.skip(1, transport.request({
             url = url,
             method = "GET",
@@ -479,10 +501,12 @@ local function httpGet(url, timeout)
     end)
     socketutil:reset_timeout()
     if overflow then
+        logger.warn("dual_wiki: 2 MB cap exceeded, aborted transfer:", url)
         return false, "too_large", "Response exceeds the 2 MB cap"
     end
     if not req_ok then
         local msg = tostring(req_err or ""):lower()
+        logger.warn("dual_wiki: transport raised for", url, "->", tostring(req_err))
         if msg:find("timeout") then
             return false, "timeout", req_err
         end
@@ -493,20 +517,45 @@ local function httpGet(url, timeout)
         if #content == 0 then
             -- v1.2.2 fix: a 200 with an empty body is a transport-level
             -- truncation, not an HTTP status error.
+            logger.warn("dual_wiki: HTTP 200 with empty body:", url)
             return false, "error", "Empty response body"
         end
+        logger.dbg("dual_wiki: GET", url, "->", code, "bytes:", #content)
         return true, content
     end
     if code == 429 then
-        return false, "http_429", status
+        logger.warn("dual_wiki: HTTP 429 rate limited:", url)
+        return false, "http_429", status, headers
     elseif type(code) == "number" then
+        logger.dbg("dual_wiki: HTTP", code, "for", url)
         return false, code >= 500 and "http_5xx" or "http_4xx", status or code
     end
     local msg = tostring(status or code or ""):lower()
     if msg:find("timeout") then
         return false, "timeout", status or code
     end
+    logger.warn("dual_wiki: request failed for", url, "->", tostring(status or code))
     return false, "error", status or code or "Network error"
+end
+
+-- Retry wrapper: only http_429 / http_5xx earn an automatic retry.
+local function httpGet(url, timeout, retries)
+    local ok, content_or_kind, detail, headers = httpGetOnce(url, timeout)
+    if ok then return true, content_or_kind end
+    retries = retries or HTTP_RETRIES
+    if retries < 1 or (content_or_kind ~= "http_429" and content_or_kind ~= "http_5xx") then
+        return false, content_or_kind, detail
+    end
+    local delay = HTTP_RETRY_BACKOFF_S
+    if content_or_kind == "http_429" and type(headers) == "table" then
+        local retry_after = tonumber(headers["retry-after"])
+        if retry_after and retry_after >= 0 and retry_after <= HTTP_RETRY_CAP_S then
+            delay = retry_after
+        end
+    end
+    logger.warn("dual_wiki: retrying after", delay, "s (", content_or_kind, "):", url)
+    socket.sleep(delay)
+    return httpGetOnce(url, timeout)
 end
 
 -- Clean and format extract text for E-ink display (uncovers heimu & formats headings)

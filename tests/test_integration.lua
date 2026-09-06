@@ -85,6 +85,52 @@ local function assertPipeline(name, word, engine, lang, expect_find)
     return cands
 end
 
+print("== deterministic 429 auto-retry (stubbed transport, no network) ==")
+do
+    -- luasocket generic request returns (1, code, headers, status); the
+    -- plugin's socket.skip(1, ...) drops the leading 1. Stub the https
+    -- module table the plugin captured at load time.
+    local https_mod = require("ssl.https")
+    local orig_request = https_mod.request
+    local calls = 0
+    https_mod.request = function(...)
+        calls = calls + 1
+        if calls == 1 then
+            return 1, 429, { ["retry-after"] = "0" }, "429 Too Many Requests"
+        end
+        return orig_request(...)
+    end
+    local cands = dw:fetchCandidates("napoleon", "wikipedia", "en", "prefix")
+    https_mod.request = orig_request
+    if type(cands) ~= "table" or #cands == 0 then
+        fail("429 then success auto-retries", tostring(cands))
+    elseif calls < 2 then
+        fail("429 retry actually re-requested", "calls=" .. calls)
+    else
+        pass("429 -> auto retry -> success (" .. #cands .. " candidates, " .. calls .. " requests)")
+    end
+end
+do
+    local https_mod = require("ssl.https")
+    local orig_request = https_mod.request
+    local calls = 0
+    https_mod.request = function()
+        calls = calls + 1
+        return 1, 429, { ["retry-after"] = "0" }, "429 Too Many Requests"
+    end
+    local cands = dw:fetchCandidates("napoleon", "wikipedia", "en", "prefix")
+    https_mod.request = orig_request
+    if cands ~= nil then
+        fail("persistent 429 returns nil after retry", tostring(cands))
+    elseif dw._last_error_kind ~= "http_429" then
+        fail("persistent 429 error kind", tostring(dw._last_error_kind))
+    elseif calls ~= 2 then
+        fail("persistent 429 retry count", "calls=" .. calls .. " (want exactly 2)")
+    else
+        pass("persistent 429 -> nil, kind=http_429, exactly 2 requests")
+    end
+end
+
 print("== queryPipeline across languages (real network) ==")
 assertPipeline("zh particle retry (量子力学的→量子力学)", "量子力学的", "wikipedia", "zh", "量子力学")
 assertPipeline("zh exact (人工智能)", "人工智能", "wikipedia", "zh", "人工智能")
