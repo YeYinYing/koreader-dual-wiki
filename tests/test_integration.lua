@@ -139,6 +139,7 @@ assertPipeline("en word-boundary (quantum entanglement)", "quantum entanglement"
 assertPipeline("ja kana (シャナ)", "シャナ", "wikipedia", "ja", "シャナ")
 assertPipeline("de (Quantenmechanik)", "Quantenmechanik", "wikipedia", "de", nil)
 assertPipeline("fr (philosophie)", "philosophie", "wikipedia", "fr", nil)
+assertPipeline("fr elision (l'équation→équation)", "l'équation", "wikipedia", "fr", "quation")
 assertPipeline("es (historia de Roma)", "historia de Roma", "wikipedia", "es", nil)
 assertPipeline("ru cyrillic (Квантовая механика)", "Квантовая механика", "wikipedia", "ru", nil)
 

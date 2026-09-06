@@ -216,6 +216,41 @@ local function stripTrailingParticle(q, lang)
     return q
 end
 
+-- v1.3.2: French/Romance elision (l'amour → amour, qu'il → il). An elided
+-- article at the head of the selection breaks prefixsearch (the article
+-- lives under the bare word). This is strictly a FALLBACK strip: the exact
+-- query always runs first, so titles that legitimately begin with an
+-- article ("Les Misérables") are safe — their case-insensitive exact form
+-- hits in Stage 1 and this strip never executes. Longest-match wins so
+-- "jusqu'à" is never mangled into "jus" by the "qu'" entry; a remainder
+-- shorter than 2 characters aborts the strip. Each stem is tried with both
+-- the ASCII apostrophe and the typographic one (U+2019).
+local ELISION_STEMS = { "jusqu", "qu", "l", "d", "n", "s", "j", "c", "m", "t", "un" }
+local ELISION_LANGS = { fr = true, it = true, pt = true }
+local ELISION_APOSTROPHES = { "'", "\226\128\153" }
+local function stripLeadingElision(q, lang)
+    if not ELISION_LANGS[lang] then return q end
+    if utf8Len(q) < 4 then return q end
+    -- Match case-insensitively: sentence-initial selections arrive as
+    -- "L'Étranger", "Qu'il" etc. Stems are pure ASCII, so lowercasing the
+    -- first few bytes never shifts byte boundaries — the match length can
+    -- be applied to the original string directly.
+    local probe = q:sub(1, 10):lower()
+    local best
+    for _, stem in ipairs(ELISION_STEMS) do
+        for _, apos in ipairs(ELISION_APOSTROPHES) do
+            local head = stem .. apos
+            if probe:sub(1, #head) == head and (not best or #head > #best) then
+                best = head
+            end
+        end
+    end
+    if not best then return q end
+    local stripped = q:sub(#best + 1)
+    if utf8Len(stripped) < 2 then return q end
+    return stripped
+end
+
 -- Latin script languages get the word-boundary good-hit rule (协同改进项 2).
 local LATIN_LANGS = { en = true, de = true, fr = true, es = true, ru = true, it = true, pt = true }
 
@@ -1001,6 +1036,11 @@ function DualWiki:_promptForSubdomain(setting_key, default_value, touchmenu_inst
                         local value = tostring(dialog:getInputText() or ""):lower():gsub("[^%a%d%-]", "")
                         if value == "" then value = default_value end
                         G_reader_settings:saveSetting(setting_key, value)
+                        -- v1.3.2: the lookup cache key is engine|lang|word — it
+                        -- does NOT include the subdomain. Without this clear, a
+                        -- subdomain switch keeps serving the previous
+                        -- community's cached results for identical words.
+                        self._lookup_cache = nil
                         UIManager:close(dialog)
                         if touchmenu_instance then touchmenu_instance:updateItems() end
                     end,
@@ -1218,6 +1258,17 @@ function DualWiki:queryPipeline(word, engine, lang)
         r2 = self:fetchCandidates(q2, engine, lang, "prefix")
         if hasGoodHit(r2, q2, plang) then
             return r2, false
+        end
+    end
+
+    -- Stage 2b (v1.3.2): leading elision strip for fr/it/pt (l'amour →
+    -- amour, l'équation → équation). Own fallback tier: a Stage-1 exact
+    -- hit on article-titled works (Les Misérables) is never disturbed.
+    local q3 = stripLeadingElision(q0, plang)
+    if q3 ~= q0 and q3 ~= q2 and not self._moegirl_unreachable then
+        local r3 = self:fetchCandidates(q3, engine, lang, "prefix")
+        if hasGoodHit(r3, q3, plang) then
+            return r3, false
         end
     end
 

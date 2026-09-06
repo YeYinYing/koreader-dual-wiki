@@ -1,5 +1,15 @@
 # Changelog
 
+## [Unreleased] — v1.3.2 candidate
+
+### Added
+
+- **Romance elision fallback** (fr/it/pt): selections like `l'amour`, `qu'il`, `l'équation` now strip the elided leading article and retry when the exact query misses, in both ASCII (`'`) and typographic (`’`) apostrophe forms, case-insensitively (`L'Étranger` at sentence start works). Longest-match protects `jusqu'à`; a remainder under 2 characters aborts the strip. Strictly a fallback tier — titles that legitimately start with an article (Les Misérables) hit exactly in Stage 1 and are never disturbed.
+
+### Fixed
+
+- Switching the Fandom community or Bilibili game-wiki subdomain now clears the session lookup cache. The cache key (`engine|lang|word`) does not include the subdomain, so the previous community's results would keep resurfacing for identical words after a switch.
+
 ## [1.3.1] - 2026-09-06
 
 ### Added

@@ -13,6 +13,7 @@
 - [ ] A3 英文书划 "quantum entanglement" → 词边界 → 命中
 - [ ] A4 日文书划「シャナの」→ 助词剥离 → 降级 ja wiki 命中
 - [ ] A5 德/法/西/俄书各划一词 → 动态语种槽位 + 命中
+- [ ] A5b 法语书划 "l'équation"（或句首 "L'équation"）→ 省音回退命中 Équation 类条目（v1.3.2）
 - [ ] A6 Fandom：英文书划 "Darth Vader" → 段落快出（section=0）→ 铅笔 → 全文（两段式）
 - [ ] A7 BWiki：划「蒙德」→ 原神 wiki 命中
 - [ ] A8 Wiktionary：划 "quantum" → 释义出

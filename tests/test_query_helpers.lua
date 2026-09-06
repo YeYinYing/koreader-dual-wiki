@@ -23,6 +23,7 @@ local chunk = assert(loadchunk(helpers .. [[
 return {
     sanitizeQuery = sanitizeQuery,
     stripTrailingParticle = stripTrailingParticle,
+    stripLeadingElision = stripLeadingElision,
     hasGoodHit = hasGoodHit,
     parseCandidatePages = parseCandidatePages,
     normalizeLang = normalizeLang,
@@ -108,6 +109,22 @@ check("V5 zh-CN → zh-cn", api.zhVariantOf("zh-CN"), "zh-cn")
 check("V6 zh (无区码) → zh-cn 兜底", api.zhVariantOf("zh"), "zh-cn")
 check("V7 nil → zh-cn 兜底", api.zhVariantOf(nil), "zh-cn")
 check("V8 非zh串 → zh-cn 兜底", api.zhVariantOf("en-US"), "zh-cn")
+
+print("== v1.3.2 stripLeadingElision (fr/it/pt 省音回退) ==")
+check("E1 ASCII l'", api.stripLeadingElision("l'amour", "fr"), "amour")
+check("E2 弯引号 l’", api.stripLeadingElision("l\226\128\153amour", "fr"), "amour")
+check("E3 qu' 最长匹配不被 qu' 截胡", api.stripLeadingElision("qu'il", "fr"), "il")
+check("E4 jusqu' 长表项优先，剩余1字不剥", api.stripLeadingElision("jusqu\226\128\153\195\160", "fr"), "jusqu\226\128\153\195\160")
+check("E5 d'or 剩余2字可剥", api.stripLeadingElision("d'or", "fr"), "or")
+check("E6 无省音原样", api.stripLeadingElision("amour", "fr"), "amour")
+check("E7 en 不适用", api.stripLeadingElision("o'clock", "en"), "o'clock")
+check("E8 it un'", api.stripLeadingElision("un'ora", "it"), "ora")
+check("E9 过短查询不剥", api.stripLeadingElision("l'a", "fr"), "l'a")
+check("E10 剩余不足2字回退", api.stripLeadingElision("d'\195\160", "fr"), "d'\195\160")
+check("E11 句首大写 L'Arc 照剥", api.stripLeadingElision("L'Arc", "fr"), "Arc")
+
+print("== v1.3.2 省音与助词叠加 ==")
+check("E12 叠拆：l'équation的 → équation", api.stripTrailingParticle(api.stripLeadingElision("l'équation的", "fr"), "zh"), "équation")
 
 print("== Phase 1 mishit guards ==")
 check("M1 (G)I-DLE 括号不动", api.sanitizeQuery("(G)I-DLE"), "(G)I-DLE")
