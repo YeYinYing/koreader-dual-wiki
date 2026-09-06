@@ -2,3 +2,6 @@
 *.swp
 *.bak
 *.tmp
+
+# KOReader reader metadata generated inside the repo tree
+*.sdr/
