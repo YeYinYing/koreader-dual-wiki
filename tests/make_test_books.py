@@ -37,6 +37,10 @@ BOOKS = {
         ("h", "Chapitre 1 : La philosophie moderne"),
         ("p", "La philosophie des Lumieres a transforme la pensee europeenne. Descartes et Voltaire en sont les figures majeures."),
         ("p", "Le doute cartésien fonde la connaissance sur la raison."),
+        # v1.3.2 elision selection material: l'équation → Équation,
+        # l'évolution → Évolution, l'histoire → Histoire on fr.wikipedia
+        ("p", "L'équation de Schrödinger décrit l'évolution des systèmes quantiques."),
+        ("p", "C'est l'histoire d'une idée qui a changé le monde."),
     ]),
     "Spanish-History-Test.epub": ("es", [
         ("h", "Capítulo 1: La historia antigua"),
