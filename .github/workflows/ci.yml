@@ -20,7 +20,8 @@ jobs:
 
       - name: Static analysis (luacheck)
         run: |
-          sudo luarocks install luacheck 0.26.2 --force
+          sudo luarocks install luacheck 0.26.1 --force 2>/dev/null || sudo luarocks install luacheck --force
+          luacheck --version | head -1
           luacheck dual_wiki.koplugin tests
 
       - name: Syntax check (luac -p)
