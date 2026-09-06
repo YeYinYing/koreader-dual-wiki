@@ -1426,6 +1426,12 @@ function DualWiki:showResult(word, cands, engine, word_boxes, lang, is_full)
         results[i] = {
             word = cand.title,
             definition = definition,
+            -- v1.3.2 crash fix: DictQuickLookup:changeDictionary() reads
+            -- results[index].dict (NOT .dictionary) for the window title;
+            -- a nil here made scrolling past the last result (auto
+            -- next-result) die on TitleBar:setText(nil). Field must match
+            -- the core dictionary result contract.
+            dict = dict_name,
             dictionary = dict_name,
             lang = result_lang,
             rtl_lang = false,

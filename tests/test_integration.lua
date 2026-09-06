@@ -208,6 +208,40 @@ do
     end
 end
 
+-- 2b. THE v1.3.2 SCROLL-CRASH REGRESSION TEST: results must carry the
+-- `dict` field (core's changeDictionary reads it for the window title;
+-- nil killed the app on wheel-past-end auto next-result). Asserts the
+-- exact contract from frontend/ui/widget/dictquicklookup.lua:1465.
+do
+    local sw = stub_class
+    package.loaded["ui/widget/infomessage"] = { new = function() return sw end }
+    package.loaded["ui/widget/dictquicklookup"] = sw
+    local shown = {}
+    package.loaded["ui/widget/dictquicklookup"].new = function(_, opts)
+        shown[#shown + 1] = opts
+        return opts
+    end
+    dw.ui = { dialog = {}, highlight = nil }
+    dw:showResult("量子力学", {
+        { title = "量子力学", extract = "物理学分支。" },
+        { title = "量子力学史话", extract = "科普著作。" },
+    }, "wikipedia", nil, "zh", false)
+    local w = shown[#shown]
+    local ok_fields = true
+    for i, r in ipairs(w.results) do
+        if type(r.dict) ~= "string" or r.dict == "" then
+            print("FAIL  result[" .. i .. "].dict must be a non-empty string, got: " .. tostring(r.dict))
+            failures = failures + 1
+            ok_fields = false
+        end
+    end
+    if ok_fields then
+        pass("results carry string `dict` field (scroll-crash regression)")
+    end
+    package.loaded["ui/widget/dictquicklookup"] = nil
+    dw.ui = nil
+end
+
 if failures > 0 then
     print("\nINTEGRATION FAILURES: " .. failures)
     os.exit(1)

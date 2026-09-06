@@ -8,6 +8,7 @@
 
 ### Fixed
 
+- **App crash when scrolling past the last result** (caught in human acceptance, root-caused from a captured crash log): the result table passed to `DictQuickLookup` used a `dictionary` field, but core's `changeDictionary()` reads `results[index].dict` for the window title. The first screen tolerated the missing field, but switching to another candidate — reached by wheel-scrolling past the end of a result, or swiping left/right — called `TitleBar:setText(nil)` and killed the app. Present since v1.2.0; results now carry the contract field `dict` (kept `dictionary` alongside), with a permanent integration regression case.
 - Switching the Fandom community or Bilibili game-wiki subdomain now clears the session lookup cache. The cache key (`engine|lang|word`) does not include the subdomain, so the previous community's results would keep resurfacing for identical words after a switch.
 
 ## [1.3.1] - 2026-09-06
