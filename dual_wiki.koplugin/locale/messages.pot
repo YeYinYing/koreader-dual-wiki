@@ -25,6 +25,9 @@ msgstr ""
 msgid "Moegirlpedia lookup"
 msgstr ""
 
+msgid "Wikipedia lookup (%1)"
+msgstr ""
+
 msgid "Wikipedia lookup (Chinese)"
 msgstr ""
 

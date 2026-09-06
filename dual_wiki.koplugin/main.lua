@@ -87,7 +87,7 @@ local MAX_RESPONSE_BYTES = 2 * 1024 * 1024
 -- v1.2.1 (M1-A3): device-agnostic User-Agent. The old hard-coded
 -- "KOReader/2024.04 (Kindle)" misrepresented every device as a Kindle and
 -- skewed per-platform statistics. Bump alongside _meta.lua on release.
-local PLUGIN_VERSION = "1.3.1"
+local PLUGIN_VERSION = "1.3.2"
 local USER_AGENT = "dual_wiki.koplugin/" .. PLUGIN_VERSION .. " (KOReader)"
 
 -- Retrieval pipeline tuning

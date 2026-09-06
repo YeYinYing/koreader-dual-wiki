@@ -47,6 +47,9 @@ msgstr "Wikipedia lookup (Chinese)"
 msgid "Wikipedia lookup (English)"
 msgstr "Wikipedia lookup (English)"
 
+msgid "Wikipedia lookup (%1)"
+msgstr "Wikipedia lookup (%1)"
+
 msgid "Wikipedia lookup (Japanese)"
 msgstr "Wikipedia lookup (Japanese)"
 

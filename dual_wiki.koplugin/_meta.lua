@@ -11,5 +11,5 @@ return {
     fullname = _("Dual Wiki"),
     description = _([[Multi-engine (Wikipedia zh/en/ja/de/fr/es/ru, Moegirlpedia,
 Fandom, Bilibili Game Wiki, Wiktionary) encyclopedia lookup for KOReader e-ink readers.]]),
-    version = "1.3.1",
+    version = "1.3.2",
 }

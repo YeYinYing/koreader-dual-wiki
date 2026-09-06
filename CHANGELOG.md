@@ -1,15 +1,25 @@
 # Changelog
 
-## [Unreleased] — v1.3.2 candidate
+## [1.3.2] - 2026-09-07
 
 ### Added
 
-- **Romance elision fallback** (fr/it/pt): selections like `l'amour`, `qu'il`, `l'équation` now strip the elided leading article and retry when the exact query misses, in both ASCII (`'`) and typographic (`’`) apostrophe forms, case-insensitively (`L'Étranger` at sentence start works). Longest-match protects `jusqu'à`; a remainder under 2 characters aborts the strip. Strictly a fallback tier — titles that legitimately start with an article (Les Misérables) hit exactly in Stage 1 and are never disturbed.
+- **Romance elision fallback** (fr/it/pt): selections like `l'amour`, `qu'il`, `l'équation` now strip the elided leading article and probe the bare word BEFORE the literal query's verdict (Stage 1b), in both ASCII (`'`) and typographic (`’`) apostrophe forms, case-insensitively (`L'Étranger` at sentence start works). Longest-match protects `jusqu'à`; a remainder under 2 characters aborts the strip. Titles that legitimately start with an article (Les Misérables) hit exactly in Stage 1 and are never disturbed.
+- **Search menu follows the book language**: one `Wikipedia lookup (XX)` entry (translated, `Wikipedia lookup (%1)`) replaces the fixed zh/en/ja trio, so de/fr/es/ru books finally have a manual Wikipedia search path.
+- **Non-ASCII case folding (`caseFold`)**: byte-walking UTF-8 fold for Latin-1 Supplement (É È Ç Ü …), Latin Extended-A (Œ), and Cyrillic (А-Я, Ё/Є/Ї). Codepoint-1:1 mapping keeps byte lengths stable for the existing byte-index logic; zh behavior unchanged (identity fold).
 
 ### Fixed
 
-- **App crash when scrolling past the last result** (caught in human acceptance, root-caused from a captured crash log): the result table passed to `DictQuickLookup` used a `dictionary` field, but core's `changeDictionary()` reads `results[index].dict` for the window title. The first screen tolerated the missing field, but switching to another candidate — reached by wheel-scrolling past the end of a result, or swiping left/right — called `TitleBar:setText(nil)` and killed the app. Present since v1.2.0; results now carry the contract field `dict` (kept `dictionary` alongside), with a permanent integration regression case.
+- **French results poisoned by accented-capital deafness** (caught in human acceptance, root-caused by stage-by-stage network probes): every case-insensitive verdict (`hasGoodHit`, `sharesPrefix`, `parseCandidatePages` exact promotion) folded with Lua's `string.lower`, which is ASCII-only — `"Équation":lower()` stays `"Équation"` and never equals the stripped probe `équation` (byte 2 `C3 89` vs `C3 A9`). The elision probe fetched the right article but the verdict rejected it, the ladder degraded to Stage 6 and surfaced the `L'Équation…` prefix noise (a TV movie, the Bogdanoff essay, a novel). All three sites now fold through `caseFold`.
+- **Result-window label for European languages**: `ENGINES.wikipedia.label` returned `Wikipedia (ZH)` for every non-ja/en language since the three-language era; de/fr/es/ru windows are now titled `Wikipedia (DE/FR/ES/RU)` (matches the dynamic highlight-button labels).
+- **App crash when scrolling past the last result** (caught in the same acceptance round, root-caused from a captured crash log): the result table passed to `DictQuickLookup` used a `dictionary` field, but core's `changeDictionary()` reads `results[index].dict` for the window title. The first screen tolerated the missing field, but switching to another candidate — reached by wheel-scrolling past the end of a result, or tapping ◁◁/▷▷ — called `TitleBar:setText(nil)` and killed the app. Present since v1.2.0; results now carry the contract field `dict` (kept `dictionary` alongside).
 - Switching the Fandom community or Bilibili game-wiki subdomain now clears the session lookup cache. The cache key (`engine|lang|word`) does not include the subdomain, so the previous community's results would keep resurfacing for identical words after a switch.
+
+### Infrastructure
+
+- Integration suite elision assertions upgraded from substring `find("quation")` — which the noise titles contain; this is exactly how the accented-capital bug escaped CI twice — to exact-title predicates (`top == "Équation"`) for both capital and lowercase `L'équation` against the live fr.wikipedia.
+- Unit matrix gained `caseFold` coverage (Latin-1, Œ, Cyrillic, length stability) and accented good-hit/sharesPrefix/exact-promotion regression cases.
+- `messages.pot` regenerated with the new `Wikipedia lookup (%1)` msgid; `Wikipedia lookup (%1)` translated across zh_CN / zh_TW / ja / en and all `.mo` recompiled.
 
 ## [1.3.1] - 2026-09-06
 

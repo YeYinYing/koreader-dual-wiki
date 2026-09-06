@@ -32,6 +32,9 @@ msgstr "ウィキペディアを検索（英語）"
 msgid "Wikipedia lookup (Japanese)"
 msgstr "ウィキペディアを検索（日本語）"
 
+msgid "Wikipedia lookup (%1)"
+msgstr "ウィキペディアを検索（%1）"
+
 msgid "Fandom lookup"
 msgstr "Fandom を検索"
 

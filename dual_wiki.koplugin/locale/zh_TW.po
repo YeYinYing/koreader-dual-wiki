@@ -26,6 +26,9 @@ msgstr "萌娘百科查詢"
 msgid "Wikipedia lookup (Chinese)"
 msgstr "維基百科查詢（中文）"
 
+msgid "Wikipedia lookup (%1)"
+msgstr "維基百科查詢（%1）"
+
 msgid "Wikipedia lookup (English)"
 msgstr "維基百科查詢（英文）"
 
