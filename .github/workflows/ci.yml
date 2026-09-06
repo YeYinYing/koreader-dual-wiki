@@ -16,7 +16,12 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Install Lua
-        run: sudo apt-get update && sudo apt-get install -y lua5.1 luajit lua-busted
+        run: sudo apt-get update && sudo apt-get install -y lua5.1 luajit lua-busted luarocks
+
+      - name: Static analysis (luacheck)
+        run: |
+          sudo luarocks install luacheck 0.26.2 --force
+          luacheck dual_wiki.koplugin tests
 
       - name: Syntax check (luac -p)
         run: |

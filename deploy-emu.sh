@@ -52,6 +52,20 @@ do_integration() {
   "$LUAJIT" "$REPO_ROOT/tests/test_integration.lua"
 }
 
+do_conflicts() {
+  # Coexistence contract: dual_wiki + vocabbuilder + gestures + coverbrowser
+  # load together in the emu runtime with real widget classes; asserts
+  # settings-namespace isolation and non-clobbering event behavior.
+  local install_dir
+  install_dir=$(ls -d "$EMU_SRC"/koreader-emulator-* 2>/dev/null | head -1)
+  if [ -z "$install_dir" ]; then
+    echo "emulator install dir not found under $EMU_SRC — run ./kodev build first" >&2
+    exit 1
+  fi
+  cd "$install_dir/koreader"
+  "$LUAJIT" "$REPO_ROOT/tests/test_conflicts.lua"
+}
+
 do_run() {
   ensure_env
   cd "$RUNTIME_DIR"
@@ -86,8 +100,9 @@ case "${1:-all}" in
   deploy) do_deploy ;;
   test)   do_test ;;
   integration) do_integration ;;
+  conflicts) do_conflicts ;;
   run)    do_run ;;
   smoke)  do_smoke "${2:-15}" ;;
   all)    do_deploy && do_test ;;
-  *)      echo "usage: $0 {deploy|test|integration|run|smoke [secs]|all}" >&2; exit 1 ;;
+  *)      echo "usage: $0 {deploy|test|integration|conflicts|run|smoke [secs]|all}" >&2; exit 1 ;;
 esac

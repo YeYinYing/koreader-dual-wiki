@@ -29,7 +29,8 @@ _G.G_reader_settings = require("luasettings"):open(
 
 -- Widget/UI stubs: main.lua only touches these inside UI code paths that
 -- this harness does not exercise (lookup/showResult/showRetryDialog).
-local stub_class = setmetatable({}, { __index = function() return stub_class end })
+local stub_class
+stub_class = setmetatable({}, { __index = function() return stub_class end })
 package.loaded["ui/widget/infomessage"] = { new = function() return stub_class end }
 package.loaded["ui/widget/inputdialog"] = { new = function() return stub_class end }
 package.loaded["ui/widget/dictquicklookup"] = stub_class
