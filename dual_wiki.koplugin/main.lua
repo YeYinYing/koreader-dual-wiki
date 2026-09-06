@@ -146,6 +146,75 @@ local function utf8Chop(s, which)
     end
 end
 
+local function utf8Decode(s, i)
+    local b = s:byte(i)
+    if not b then return nil, 0 end
+    if b < 0x80 then return b, 1 end
+    if b < 0xE0 then
+        local b2 = s:byte(i + 1)
+        if not b2 then return b, 1 end
+        return (b - 0xC0) * 64 + (b2 - 0x80), 2
+    end
+    if b < 0xF0 then
+        local b2, b3 = s:byte(i + 1), s:byte(i + 2)
+        if not b2 or not b3 then return b, 1 end
+        return ((b - 0xE0) * 64 + (b2 - 0x80)) * 64 + (b3 - 0x80), 3
+    end
+    local b2, b3, b4 = s:byte(i + 1), s:byte(i + 2), s:byte(i + 3)
+    if not b2 or not b3 or not b4 then return b, 1 end
+    return (((b - 0xF0) * 64 + (b2 - 0x80)) * 64 + (b3 - 0x80)) * 64 + (b4 - 0x80), 4
+end
+
+local function utf8Encode(cp)
+    if cp < 0x80 then return string.char(cp) end
+    if cp < 0x800 then return string.char(0xC0 + math.floor(cp / 64), 0x80 + cp % 64) end
+    if cp < 0x10000 then
+        return string.char(
+            0xE0 + math.floor(cp / 4096),
+            0x80 + math.floor(cp / 64) % 64,
+            0x80 + cp % 64
+        )
+    end
+    return string.char(
+        0xF0 + math.floor(cp / 262144),
+        0x80 + math.floor(cp / 4096) % 64,
+        0x80 + math.floor(cp / 64) % 64,
+        0x80 + cp % 64
+    )
+end
+
+-- Lua :lower only folds ASCII; French É/È/À etc. and Cyrillic never fold.
+-- This folds the ranges that matter for the plugin's Latin/Cyrillic wikis
+-- without pulling in an external unicode library.
+local function caseFold(s)
+    local out = {}
+    local i = 1
+    while i <= #s do
+        local cp, w = utf8Decode(s, i)
+        if not cp then break end
+        if cp >= 65 and cp <= 90 then
+            cp = cp + 32
+        elseif cp >= 192 and cp <= 214 then
+            cp = cp + 32
+        elseif cp >= 216 and cp <= 222 then
+            cp = cp + 32
+        elseif cp >= 1040 and cp <= 1071 then
+            cp = cp + 32
+        elseif cp == 1025 then
+            cp = 1105
+        elseif cp == 1028 then
+            cp = 1108
+        elseif cp == 1031 then
+            cp = 1111
+        elseif cp == 338 then
+            cp = 339
+        end
+        out[#out + 1] = utf8Encode(cp)
+        i = i + w
+    end
+    return table.concat(out)
+end
+
 -- Zero-width noise: U+200B/200C/200D (UTF-8: E2 80 8B/8C/8D) and U+FEFF (EF BB BF)
 local ZERO_WIDTH = { "\226\128\139", "\226\128\140", "\226\128\141", "\239\187\191" }
 
@@ -264,14 +333,14 @@ local LATIN_LANGS = { en = true, de = true, fr = true, es = true, ru = true, it 
 local function hasGoodHit(cands, q, lang)
     if not cands then return false end
     if LATIN_LANGS[lang] then
-        local ql = q:lower()
+        local ql = caseFold(q)
         for _, c in ipairs(cands) do
-            local tl = c.title:lower()
+            local tl = caseFold(c.title)
             if tl == ql then
                 return true
             end
             if tl:sub(1, #ql) == ql then
-                local nxt = c.title:sub(#q + 1, #q + 1)
+                local nxt = c.title:sub(#ql + 1, #ql + 1)
                 if nxt == "" or nxt == " " then
                     return true
                 end
@@ -301,9 +370,9 @@ local function sharesPrefix(title, q, lang)
     if LATIN_LANGS[lang] then
         -- v1.3.0: %a only matches ASCII letters, which fails for Cyrillic
         -- (ru) titles; %S+ accepts any non-space script's first word.
-        local first_word = title:lower():match("^(%S+)")
+        local first_word = caseFold(title):match("^(%S+)")
         if not first_word or #first_word < 3 then return false end
-        return q:lower():sub(1, #first_word) == first_word
+        return caseFold(q):sub(1, #first_word) == first_word
     end
     local n, i = 0, 1
     while i <= #title and i <= #q do
@@ -338,11 +407,12 @@ local function parseCandidatePages(data, query)
     local cands = {}
     for _, page in ipairs(pages) do
         if type(page) == "table" and page.title and page.ns == 0 and not page.missing then
+            local is_exact = (page.title == query) or (caseFold(page.title) == caseFold(query))
             cands[#cands + 1] = {
                 title = page.title,
                 extract = page.extract or "",
                 index = page.index or 999,
-                exact = (page.title == query),
+                exact = is_exact,
             }
         end
     end

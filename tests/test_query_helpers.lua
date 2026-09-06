@@ -25,6 +25,8 @@ return {
     stripTrailingParticle = stripTrailingParticle,
     stripLeadingElision = stripLeadingElision,
     hasGoodHit = hasGoodHit,
+    sharesPrefix = sharesPrefix,
+    caseFold = caseFold,
     parseCandidatePages = parseCandidatePages,
     normalizeLang = normalizeLang,
     zhVariantOf = zhVariantOf,
@@ -122,6 +124,28 @@ check("E8 it un'", api.stripLeadingElision("un'ora", "it"), "ora")
 check("E9 过短查询不剥", api.stripLeadingElision("l'a", "fr"), "l'a")
 check("E10 剩余不足2字回退", api.stripLeadingElision("d'\195\160", "fr"), "d'\195\160")
 check("E11 句首大写 L'Arc 照剥", api.stripLeadingElision("L'Arc", "fr"), "Arc")
+
+print("== v1.3.2 caseFold (Lua :lower 漏掉的非 ASCII 大写) ==")
+check("C1 É→é", api.caseFold("\195\137"), "\195\169")
+check("C2 È→è", api.caseFold("\195\136"), "\195\168")
+check("C3 Ç→ç", api.caseFold("\195\135"), "\195\167")
+check("C4 ASCII 不动", api.caseFold("L'Arc"), "l'arc")
+check("C5 Cyrillic А→а", api.caseFold("\208\144"), "\208\176")
+check("C6 混合串", api.caseFold("\195\137QUATION"), "\195\169quation")
+check("C7 德语 Ü→ü", api.caseFold("\195\156"), "\195\188")
+check("C8 长度不变(字节索引安全)", #api.caseFold("\195\137quation"), #"\195\137quation")
+
+print("== v1.3.2 重音大小写判定 (用户验收 L'équation 回归) ==")
+check("A1 hasGoodHit Équation↔équation", api.hasGoodHit(mk("Équation", "Équations de Maxwell"), "équation", "fr"), true)
+check("A2 hasGoodHit 大写查询 L'Équation 噪声不认 exact", api.hasGoodHit(mk("L'Équation de l'apocalypse"), "L'équation", "fr"), true)
+check("A3 sharesPrefix 重音折叠", api.sharesPrefix("Équation", "équation", "fr"), true)
+check("A4 parseCandidatePages exact 重音折叠", (function()
+    local c = api.parseCandidatePages({ query = { pages = {
+        { title = "Équation", ns = 0, index = 2 },
+        { title = "Équations de Maxwell", ns = 0, index = 1 },
+    } } }, "équation")
+    return c and c[1].title or "nil"
+end)(), "Équation")
 
 print("== v1.3.2 省音与助词叠加 ==")
 check("E12 叠拆：l'équation的 → équation", api.stripTrailingParticle(api.stripLeadingElision("l'équation的", "fr"), "zh"), "équation")

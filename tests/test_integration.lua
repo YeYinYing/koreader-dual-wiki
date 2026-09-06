@@ -70,7 +70,7 @@ local function retry429(fn)
     return result
 end
 
-local function assertPipeline(name, word, engine, lang, expect_find)
+local function assertPipeline(name, word, engine, lang, expect_find, expect_title)
     throttle()
     local cands = retry429(function() return dw:queryPipeline(word, engine, lang) end)
     if type(cands) ~= "table" or #cands == 0 then
@@ -78,6 +78,10 @@ local function assertPipeline(name, word, engine, lang, expect_find)
         return nil
     end
     local title = tostring(cands[1].title or "")
+    if expect_title and not expect_title(title) then
+        fail(name, "top hit '" .. title .. "' fails the title predicate")
+        return cands
+    end
     if expect_find and not title:find(expect_find, 1, true) then
         fail(name, "top hit '" .. title .. "' lacks '" .. expect_find .. "'")
         return cands
@@ -139,9 +143,19 @@ assertPipeline("en word-boundary (quantum entanglement)", "quantum entanglement"
 assertPipeline("ja kana (シャナ)", "シャナ", "wikipedia", "ja", "シャナ")
 assertPipeline("de (Quantenmechanik)", "Quantenmechanik", "wikipedia", "de", nil)
 assertPipeline("fr (philosophie)", "philosophie", "wikipedia", "fr", nil)
-assertPipeline("fr elision (l'équation→équation)", "l'équation", "wikipedia", "fr", "quation")
 assertPipeline("es (historia de Roma)", "historia de Roma", "wikipedia", "es", nil)
 assertPipeline("ru cyrillic (Квантовая механика)", "Квантовая механика", "wikipedia", "ru", nil)
+
+-- v1.3.2 regression (user-acceptance): sentence-initial capital "L'équation"
+-- must resolve to the math article Équation, NOT the L'Équation* works
+-- (TV movie / Bogdanoff essay / Khadra novel) that literal prefixsearch
+-- returns. The check is exact-title, NOT substring: "L'Équation de
+-- l'apocalypse" contains "quation" and would silently pass a find() assert
+-- (this is exactly how the bug escaped CI twice).
+assertPipeline("fr capital elision (L'équation→Équation)", "L'équation", "wikipedia", "fr", nil,
+    function(title) return title == "Équation" end)
+assertPipeline("fr lower elision (l'équation→Équation)", "l'équation", "wikipedia", "fr", nil,
+    function(title) return title == "Équation" end)
 
 print("== moegirl (ACG engine, wikipedia degradation allowed) ==")
 do
