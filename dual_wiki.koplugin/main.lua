@@ -401,7 +401,10 @@ local ENGINES = {
             local l = lang or "zh"
             if l == "ja" then return _("Wikipedia (JA)") end
             if l == "en" then return _("Wikipedia (EN)") end
-            return _("Wikipedia (ZH)")
+            -- v1.3.2: the old three-language era returned (ZH) for EVERY
+            -- non-ja/en language — result windows for fr/de/es/ru lookups
+            -- were mislabeled (user-acceptance finding).
+            return string.format(_("Wikipedia (%s)"), l:upper())
         end,
         needsConverttitles = function(lang) return (lang or "zh") == "zh" end,
         particleLang = function(lang) return lang or "zh" end,
@@ -916,11 +919,17 @@ function DualWiki:addToMainMenu(menu_items)
             self:showSearchDialog("moegirl", nil, nil, "zh")
         end,
     }
-    menu_items.dualwiki_wikipedia_zh = {
-        text = _("Wikipedia lookup (Chinese)"),
+    -- v1.3.2: ONE Wikipedia search entry that follows the current book's
+    -- language (was: fixed zh/en/ja trio, which left de/fr/es/ru books with
+    -- no manual Wikipedia path — user-acceptance finding). The language is
+    -- resolved when the menu opens so the dialog title states it.
+    menu_items.dualwiki_wikipedia = {
+        text_func = function()
+            return T(_("Wikipedia lookup (%1)"), self:_bookLang():upper())
+        end,
         sorting_hint = "search",
         callback = function()
-            self:showSearchDialog("wikipedia", nil, nil, "zh")
+            self:showSearchDialog("wikipedia", nil, nil, self:_bookLang())
         end,
     }
     menu_items.dualwiki_wikipedia_en = {
@@ -1253,6 +1262,22 @@ function DualWiki:queryPipeline(word, engine, lang)
     else
         self._moegirl_unreachable = false
     end
+
+    -- Stage 1b (v1.3.2): elision competition BEFORE any good-hit verdict.
+    -- fr/it/pt selections with a leading elided article (l'équation →
+    -- équation) must challenge Stage 1's literal-prefix hits: on
+    -- fr.wikipedia, "l'équation" prefix-matches L'Équation de l'apocalypse
+    -- (a TV movie) and would win the verdict, burying the intended
+    -- Équation entry behind the elision strip. The bare-word probe runs
+    -- first here; an exact bare hit beats the elided-prefix noise.
+    local q3 = stripLeadingElision(q0, plang)
+    if q3 ~= q0 and not self._moegirl_unreachable then
+        local r3 = self:fetchCandidates(q3, engine, lang, "prefix")
+        if hasGoodHit(r3, q3, plang) then
+            return r3, false
+        end
+    end
+
     if hasGoodHit(r1, q0, plang) then
         return r1, false
     end
@@ -1260,22 +1285,12 @@ function DualWiki:queryPipeline(word, engine, lang)
     -- Stage 2: trailing-particle drop retry (量子力学的 → 量子力学,
     -- シャナの → シャナ, Oppenheimer's → Oppenheimer).
     -- Skipped when moegirl itself is unreachable (no point re-hitting it).
+    -- (v1.3.2: the elision strip moved up to Stage 1b; q3 is computed there.)
     local r2 = nil
     if q2 ~= q0 and utf8Len(q2) >= 2 and not self._moegirl_unreachable then
         r2 = self:fetchCandidates(q2, engine, lang, "prefix")
         if hasGoodHit(r2, q2, plang) then
             return r2, false
-        end
-    end
-
-    -- Stage 2b (v1.3.2): leading elision strip for fr/it/pt (l'amour →
-    -- amour, l'équation → équation). Own fallback tier: a Stage-1 exact
-    -- hit on article-titled works (Les Misérables) is never disturbed.
-    local q3 = stripLeadingElision(q0, plang)
-    if q3 ~= q0 and q3 ~= q2 and not self._moegirl_unreachable then
-        local r3 = self:fetchCandidates(q3, engine, lang, "prefix")
-        if hasGoodHit(r3, q3, plang) then
-            return r3, false
         end
     end
 
