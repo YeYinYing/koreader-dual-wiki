@@ -282,8 +282,18 @@ end
 -- NOT emitted on generator=search — verified live 2026-09-07).
 do
     throttle()
-    retry429(function() return dw:fetchCandidates("Catte", "wikipedia", "en", "search") end)
-    local sugg = dw._last_suggestion
+    local sugg
+    for attempt_dym = 1, 3 do
+        retry429(function() return dw:fetchCandidates("Catte", "wikipedia", "en", "search") end)
+        sugg = dw._last_suggestion
+        if type(sugg) == "string" and sugg:lower():find("cattle", 1, true) then
+            break
+        end
+        if attempt_dym < 3 then
+            print("  .. did-you-mean degraded (attempt " .. attempt_dym .. "/3), backing off 10 s ..")
+            socket.sleep(10)
+        end
+    end
     if type(sugg) == "string" and sugg:lower():find("cattle", 1, true) then
         pass("did-you-mean (Catte → " .. sugg .. ")")
     else
@@ -531,6 +541,55 @@ do
         pass("retry dialog omits suggestion button when none captured")
     else
         fail("retry dialog omits suggestion button when none captured", "stray button present")
+    end
+
+    -- 2e. Bug-hunt regression: the suggestion button's callback must close
+    -- the INPUT DIALOG, not the button table. A previous version closed an
+    -- identically-named button-table local, leaving the retry dialog open
+    -- underneath the result window (and UIManager:close on a non-widget).
+    do
+        local closed = {}
+        local UM = package.loaded["ui/uimanager"]
+        local old_close = UM.close
+        UM.close = function(_, w) closed[#closed + 1] = w end
+        -- Shadow DictQuickLookup.new on the stub table main.lua captured
+        -- (block 2c already proves this pattern; never require the real
+        -- module here — it pulls fontlist/Device and crashes the harness).
+        local DQ = stub_class
+        local old_dq_new = DQ.new
+        local windows = {}
+        DQ.new = function(_, opts)
+            windows[#windows + 1] = opts
+            return opts
+        end
+        -- Seed the cache so the re-lookup replays a hit deterministically
+        -- (no network, no scheduler dependence).
+        dw._lookup_cache = { ["wikipedia|en|cattle"] = { cands = {
+            { title = "cattle", extract = "bovine animal", index = 1 },
+        }, is_full = false, at = os.time() } }
+        dw._last_suggestion = "cattle"
+        dw:showRetryDialog("Catte", "wikipedia", nil, "en")
+        local d3 = dialogs[#dialogs]
+        local btn = d3 and d3.buttons and d3.buttons[1] and d3.buttons[1][1]
+        if btn and tostring(btn.text):find("cattle", 1, true) then
+            btn.callback() -- must close the InputDialog, then run lookup
+            if closed[1] == dlg_stub then
+                pass("suggestion button closes the retry InputDialog (not the button table)")
+            else
+                fail("suggestion button closes retry InputDialog",
+                    "closed=" .. tostring(closed[1]) .. " expected=" .. tostring(dlg_stub))
+            end
+            if #windows == 1 and windows[1].results[1].word == "cattle" then
+                pass("suggestion button re-queries the suggestion (cache-hit window)")
+            else
+                fail("suggestion button re-query", "windows=" .. #windows)
+            end
+        else
+            fail("suggestion button regression harness", "button not found on dialog")
+        end
+        DQ.new = old_dq_new
+        UM.close = old_close
+        dw._lookup_cache = nil
     end
 
     dw.ui = nil

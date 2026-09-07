@@ -693,7 +693,7 @@ keepalive.enabled = os.getenv("DUALWIKI_NO_KEEPALIVE") == nil
 local function httpGetOnce(url, timeout)
     -- v1.3.3 (E7): pooled-TLS fast path. Unit tests set DUALWIKI_NO_KEEPALIVE
     -- (or keepalive.enabled=false) to pin the legacy transport.
-    local ka_ok, ka_body, ka_kind = keepalive.request(
+    local ka_ok, ka_body, ka_kind, _, ka_headers = keepalive.request(
         url, timeout or 6, MAX_RESPONSE_BYTES, USER_AGENT)
     if ka_ok == true then
         return true, ka_body
@@ -701,7 +701,8 @@ local function httpGetOnce(url, timeout)
     if ka_ok == false then
         -- deterministic verdict from the pooled transport — do not re-hit
         -- the legacy path or we would double-limit transient 429/5xx.
-        return false, ka_kind or "error", nil, nil
+        -- The headers ride along so the Retry-After backoff keeps working.
+        return false, ka_kind or "error", nil, ka_headers
     end
     -- ka_ok == nil: not handled or internal anomaly — legacy path.
     local transport = socket_url.parse(url).scheme == "https" and https or http
@@ -1109,6 +1110,15 @@ function DualWiki:_registerHighlightButtons()
         local entry = enabled and self:_primaryButton() or nil
         local word = (entry and hl.selected_text) and util.cleanupSelectedText(hl.selected_text.text) or nil
         if enabled and entry and word and word ~= "" and utf8Len(word) <= 60 then
+            -- The cache key MUST match lookup()'s, which routes the language
+            -- (B7) BEFORE keying — otherwise a foreign-script selection in a
+            -- zh book stores under wikipedia|zh|word while the tap reads
+            -- wikipedia|en|word and the whole prewarm is wasted work.
+            local prewarm_lang = entry.lang
+            if entry.engine == "wikipedia" and prewarm_lang == "zh" and not self:_isLangLocked() then
+                local routed = routeLangForScript(sanitizeQuery(word))
+                if routed then prewarm_lang = routed end
+            end
             if self._prewarm_scheduled then
                 UIManager:unschedule(self._prewarm_scheduled)
             end
@@ -1120,7 +1130,7 @@ function DualWiki:_registerHighlightButtons()
             scheduled = function()
                 self._prewarm_scheduled = nil
                 if not self.ui or not self.ui.dialog then return end
-                local cache_key = table.concat({ entry.engine, entry.lang or "", word }, "|")
+                local cache_key = table.concat({ entry.engine, prewarm_lang or "", word }, "|")
                 local cached = self._lookup_cache and self._lookup_cache[cache_key]
                 if cached and cached.cands then return end
                 if cached and not cached.cands
@@ -1128,11 +1138,11 @@ function DualWiki:_registerHighlightButtons()
                     return -- recently missed: don't re-burn the ladder
                 end
                 local ok, cands, is_full = pcall(function()
-                    return self:queryPipeline(word, entry.engine, entry.lang)
+                    return self:queryPipeline(word, entry.engine, prewarm_lang)
                 end)
                 if ok and type(cands) == "table" and #cands > 0 and not self._last_error_kind then
                     if not (ENGINES[entry.engine] and ENGINES[entry.engine].fullTextViaParse) then
-                        cands = self:augmentLangLinks(cands, entry.engine, entry.lang)
+                        cands = self:augmentLangLinks(cands, entry.engine, prewarm_lang)
                     end
                     self:_storeCacheEntry(cache_key, cands, is_full)
                 elseif ok and not self._last_error_kind then
@@ -1756,6 +1766,9 @@ end
 function DualWiki:augmentLangLinks(cands, engine, lang)
     if type(cands) ~= "table" or #cands == 0 then return cands end
     if engine ~= "wikipedia" then return cands end
+    -- A dab-expansion list is an index of same-topic senses in ONE language;
+    -- bridging its top entry to another language is noise, not help.
+    if cands[1].dab_item then return cands end
     local book_lang = self:_bookLang()
     local target
     if book_lang ~= lang then
@@ -2337,17 +2350,18 @@ end
 
 -- v1.3.3 (A3): a one-tap button that re-queries the spelling suggestion
 -- MediaWiki returned on the failed round (captured in fetchCandidates,
--- cleared at each lookup start).
+-- cleared at each lookup start). NOTE: deliberately does NOT close any
+-- dialog itself — the button table is not a widget; showRetryDialog wraps
+-- this callback to close the real InputDialog first (a previous version
+-- closed the button table via an identically-named local, leaving the
+-- retry dialog open underneath the result window).
 function DualWiki:_retrySuggestionButton(suggestion, engine, word_boxes, lang)
-    local retry_dialog
-    retry_dialog = {
+    return {
         text = T(_("Try \"%1\""), suggestion),
         callback = function()
-            UIManager:close(retry_dialog)
             self:lookup(suggestion, engine, word_boxes, lang)
         end,
     }
-    return retry_dialog
 end
 
 function DualWiki:showRetryDialog(failed_word, engine, word_boxes, lang)
@@ -2389,7 +2403,13 @@ function DualWiki:showRetryDialog(failed_word, engine, word_boxes, lang)
     local buttons = { {} }
     if suggestion and suggestion ~= failed_word
         and caseFold(suggestion) ~= caseFold(failed_word) then
-        buttons[1] = { self:_retrySuggestionButton(suggestion, engine, word_boxes, lang) }
+        local suggestion_btn = self:_retrySuggestionButton(suggestion, engine, word_boxes, lang)
+        local suggestion_lookup = suggestion_btn.callback
+        suggestion_btn.callback = function()
+            UIManager:close(retry_dialog)
+            suggestion_lookup()
+        end
+        buttons[1] = { suggestion_btn }
     end
     table.insert(buttons, {
         {

@@ -264,10 +264,12 @@ local function request_once(sock, url_parts, timeout, max_bytes, user_agent)
         "Connection: keep-alive",
         "", "",
     }, "\r\n")
+    -- Bound the send AND the reads by the request timeout — a pooled socket
+    -- still carries the 60 s idle timeout from pool_put, and send() must
+    -- never outlive the caller's budget.
+    sock:settimeout(timeout or 10)
     local sent, serr = sock:send(req)
     if not sent then return nil, nil, serr end
-
-    sock:settimeout(timeout or 10)
     -- Read the head line-by-line until the blank terminator.
     local lines = {}
     while true do
