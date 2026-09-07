@@ -1,5 +1,20 @@
 # Changelog
 
+## [Unreleased] — v1.3.3 search-quality candidate
+
+### Added
+
+- **Disambiguation detection and expansion** (A1): the merged candidate request now piggybacks `prop=pageprops&ppprop=disambiguation`, so a Disambiguator-flagged top hit (en `Mercury`, ja `シャナ`, …) is no longer surfaced as a bare index page. The pipeline fetches the dab page's section-0 wikitext, extracts the curated `[[Title]]` bullets in the editor's semantic order (primary topic first; plain-text and descriptive-link bullets are rejected so ja descriptions like `[[英語圏]]の女性名…` or 漫画『[[9番目のムサシ]]…' never leak in), then fills every item's definition with ONE batched intro-extract request. Items are tagged 【消歧义义项】 and pencil-load normally. `prop=links` was rejected for this: it is anon-capped (pllimit ≤10) and reordered, which dropped the marquee 灼眼のシャナ entirely on ja.wp and ranked "Anna Kavan" above the planet on en.wp.
+- **"Did you mean" suggestions** (A3): the Stage-5 search request carries `gsrinfo=suggestion`; when the whole ladder misses, the retry dialog shows a translated hint line (`您是不是要找：%1？`) and a one-tap `试查"%1"` button. Captured per-lookup round and cleared on read (a stale suggestion can never attach to a later failure).
+- **European phrase particles** (B5): a second, word-level trailing-stopword table (`PHRASE_PARTICLES`, fr/es/it/de) feeds Stage 2's fallback — `L'histoire de` → `L'histoire`, `Theorie der` → `Theorie`. Matched case-insensitively via `caseFold`, whole tokens only (leading space required — `de Gaulle` survives), remainder ≥2 chars. Char-level `PARTICLES` still win first.
+- **Selection script routing** (B7): `routeLangForScript` sniffs pure-Latin / pure-Cyrillic / pure-kana selections; a zh-defaulted book receiving such a selection routes straight to en/ru/ja.wikipedia BEFORE the first request (the result window label follows the routed language). Previously a Latin selection burned the zh probe (up to 3 requests) before Stage 3's fallback. Explicit language locks (per-book or global) are honored — routing only refines auto-detected languages; Stage 3 stays as the locked-zh safety net.
+
+### Infrastructure
+
+- Integration suite: dab-expansion contracts asserted against live en.wp (`Mercury → Mercury (planet)` top) and ja.wp (灼眼のシャナ present among シャナ's items), with a bounded 3-attempt retry because a 429 can silently degrade an expansion; `assertPipeline` itself retries degraded ladders (the Wikimedia edge 429s aggressively under this suite's request pattern, which once let a transient Stage-1b failure masquerade as the v1.3.2 elision regression).
+- Unit matrix: phrase-particle cases (fr/es/it/de × hit/no-hurt), `routeLangForScript` matrix (Latin/Cyrillic/kana/mixed/digits), dab-flag parsing, and `hasGoodHit`'s new dab-exact rule.
+- Locale: 3 new msgids (`Disambiguation entry`, `Did you mean: %1?`, `Try "%1"`) across zh_CN/zh_TW/ja/en; `messages.pot` synced; all `.mo` recompiled.
+
 ## [1.3.2] - 2026-09-07
 
 ### Added

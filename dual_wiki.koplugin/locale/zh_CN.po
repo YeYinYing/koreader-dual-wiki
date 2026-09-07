@@ -29,6 +29,15 @@ msgstr "维基百科查询（中文）"
 msgid "Wikipedia lookup (%1)"
 msgstr "维基百科查询（%1）"
 
+msgid "Disambiguation entry"
+msgstr "消歧义义项"
+
+msgid "Did you mean: %1?"
+msgstr "您是不是要找：%1？"
+
+msgid "Try \"%1\""
+msgstr "试查“%1”"
+
 msgid "Wikipedia lookup (English)"
 msgstr "维基百科查询（英文）"
 

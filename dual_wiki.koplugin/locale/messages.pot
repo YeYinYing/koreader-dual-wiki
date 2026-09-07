@@ -28,6 +28,15 @@ msgstr ""
 msgid "Wikipedia lookup (%1)"
 msgstr ""
 
+msgid "Disambiguation entry"
+msgstr ""
+
+msgid "Did you mean: %1?"
+msgstr ""
+
+msgid "Try \"%1\""
+msgstr ""
+
 msgid "Wikipedia lookup (Chinese)"
 msgstr ""
 

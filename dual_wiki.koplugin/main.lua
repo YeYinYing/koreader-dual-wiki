@@ -271,6 +271,18 @@ local PARTICLES = {
     ja = { "の", "に", "を", "は", "が", "で", "と", "へ", "も", "な", "よ", "ね" },
     en = { "'s", "’s" },
 }
+-- v1.3.3 (B5): European trailing stopwords, one space-delimited token per
+-- entry (leading space is part of the pattern). Deliberately conservative —
+-- function words only, no pronouns/verbs, so "de Gaulle" or "die Hose"
+-- never lose their head noun. Declared BEFORE stripTrailingParticle (Lua
+-- forward-reference: a later local would not be captured as its upvalue).
+local PHRASE_PARTICLES = {
+    fr = { " de", " du", " des", " la", " le", " les", " et", " est" },
+    es = { " de", " del", " la", " el", " y", " en" },
+    it = { " di", " del", " della", " e", " in" },
+    de = { " der", " die", " das", " und", " des", " dem", " den" },
+}
+
 local function stripTrailingParticle(q, lang)
     local list = PARTICLES[lang] or PARTICLES.zh
     if q == "" or utf8Len(q) <= 2 then return q end
@@ -279,6 +291,23 @@ local function stripTrailingParticle(q, lang)
             local stripped = q:sub(1, #q - #p)
             if utf8Len(stripped) >= 2 then
                 return stripped
+            end
+        end
+    end
+    -- v1.3.3 (B5): word-level trailing stopwords for the European tier —
+    -- space-delimited tokens ("L'histoire de" → "L'histoire"), matched
+    -- case-insensitively via caseFold and only when the remainder keeps ≥2
+    -- characters. Char-level PARTICLES above still win first; whole-word
+    -- tokens like "Rome" or "Gaulle" never match (leading space required).
+    local phrases = PHRASE_PARTICLES[lang]
+    if phrases then
+        local fq = caseFold(q)
+        for _, p in ipairs(phrases) do
+            if fq:sub(-#p) == p then
+                local stripped = q:sub(1, #q - #p)
+                if utf8Len(stripped) >= 2 then
+                    return stripped
+                end
             end
         end
     end
@@ -323,6 +352,38 @@ end
 -- Latin script languages get the word-boundary good-hit rule (协同改进项 2).
 local LATIN_LANGS = { en = true, de = true, fr = true, es = true, ru = true, it = true, pt = true }
 
+-- v1.3.3 (B7): sniff the dominant script of a selection for engine routing.
+-- Only three UNAMBIGUOUS cases route: pure-Latin, pure-Cyrillic, pure-kana.
+-- Anything mixed (灼眼のシャナ = CJK+kana), Greek/Hangul, or digit-only
+-- stays put — the pipeline's own Stage 3/6 fallbacks keep handling those.
+-- Codepoint walks are byte-safe via utf8Decode; letters only, so digits and
+-- punctuation never tip the verdict.
+local function routeLangForScript(q)
+    if not q or utf8Len(q) < 2 then return nil end
+    local latin, cyrillic, kana, other = 0, 0, 0, 0
+    local i = 1
+    while i <= #q do
+        local cp, w = utf8Decode(q, i)
+        if not cp then break end
+        if (cp >= 0x41 and cp <= 0x5A) or (cp >= 0x61 and cp <= 0x7A)
+            or ((cp >= 0xC0 and cp <= 0x24F) and cp ~= 0xD7 and cp ~= 0xF7) then
+            latin = latin + 1
+        elseif cp >= 0x400 and cp <= 0x4FF then
+            cyrillic = cyrillic + 1
+        elseif (cp >= 0x3041 and cp <= 0x309F) or (cp >= 0x30A0 and cp <= 0x30FF) then
+            kana = kana + 1
+        elseif (cp >= 0x3400 and cp <= 0x4DBF) or (cp >= 0x4E00 and cp <= 0x9FFF)
+            or (cp >= 0x370 and cp <= 0x3FF) or (cp >= 0xAC00 and cp <= 0xD7AF) then
+            other = other + 1
+        end
+        i = i + w
+    end
+    if kana > 0 and latin == 0 and cyrillic == 0 and other == 0 then return "ja" end
+    if cyrillic > 0 and latin == 0 and kana == 0 and other == 0 then return "ru" end
+    if latin > 0 and cyrillic == 0 and kana == 0 and other == 0 then return "en" end
+    return nil
+end
+
 -- A "good hit" is an exact match, or:
 --   CJK: a title sharing the query's full prefix and ≤2 chars longer
 --        (小笠原道 → 小笠原道大); long prefix-noise (量子力学的数学基础)
@@ -354,6 +415,15 @@ local function hasGoodHit(cands, q, lang)
             return true
         end
         if q_len >= 2 and c.title:sub(1, #q) == q and utf8Len(c.title) - q_len <= 2 then
+            return true
+        end
+    end
+    -- v1.3.3 (A1): a Disambiguator-flagged exact hit is a good hit — the
+    -- pipeline expands it into its item list downstream. Japanese titles
+    -- like シャナ are pure dab pages whose "extract" is an index, which the
+    -- length/≤2-chars rule above can never bless.
+    for _, c in ipairs(cands) do
+        if c.dab and c.title == q then
             return true
         end
     end
@@ -408,11 +478,16 @@ local function parseCandidatePages(data, query)
     for _, page in ipairs(pages) do
         if type(page) == "table" and page.title and page.ns == 0 and not page.missing then
             local is_exact = (page.title == query) or (caseFold(page.title) == caseFold(query))
+            local pageprops = page.pageprops
             cands[#cands + 1] = {
                 title = page.title,
                 extract = page.extract or "",
                 index = page.index or 999,
                 exact = is_exact,
+                -- v1.3.3 (A1): Disambiguator flag, delivered via
+                -- prop=pageprops&ppprop=disambiguation. Absent (nil) on
+                -- non-dab pages and on engines that skip the prop block.
+                dab = (type(pageprops) == "table" and pageprops.disambiguation ~= nil) and true or nil,
             }
         end
     end
@@ -711,6 +786,19 @@ function DualWiki:_bookLang()
         end
     end
     return "zh"
+end
+
+-- v1.3.3 (B7): whether the user explicitly pinned the language (per-book or
+-- global). Script routing must not override an explicit choice; auto mode
+-- (metadata-detected) may be refined by the selection's own script.
+function DualWiki:_isLangLocked()
+    local doc_settings = self.ui and self.ui.doc_settings
+    if doc_settings and doc_settings.readSetting
+        and doc_settings:readSetting("dualwiki_lang_lock") then
+        return true
+    end
+    return (G_reader_settings ~= nil
+        and G_reader_settings:readSetting("dualwiki_lang") ~= nil) or false
 end
 
 -- v1.2.1 (M1): raw (un-normalized) doc language string, e.g. "zh-Hant" /
@@ -1191,7 +1279,11 @@ function DualWiki:fetchCandidates(q, engine, lang, mode)
     local esc_q = socket_url.escape(q)
     local params
     if mode == "search" then
-        params = string.format("&generator=search&gsrsearch=%s&gsrlimit=%d", esc_q, MAX_CANDIDATES)
+        -- v1.3.3 (A3): gsrinfo=suggestion piggybacks MediaWiki's spell
+        -- correction on the same request; captured below for the retry
+        -- dialog ("did you mean").
+        params = string.format("&generator=search&gsrsearch=%s&gsrlimit=%d&gsrinfo=suggestion",
+            esc_q, MAX_CANDIDATES)
     else
         params = string.format("&generator=prefixsearch&gpssearch=%s&gpslimit=%d", esc_q, MAX_CANDIDATES)
     end
@@ -1201,8 +1293,11 @@ function DualWiki:fetchCandidates(q, engine, lang, mode)
         -- block entirely (avoids per-wiki "Unrecognized parameter" noise).
         params = params .. "&redirects=1&format=json&formatversion=2"
     else
+        -- v1.3.3 (A1): pageprops piggybacks the Disambiguator flag on the
+        -- same merged request; core prop, so moegirl tolerates it even
+        -- without the extension (flag just never fires there).
         params = params
-            .. "&prop=extracts&explaintext=1&exintro=1&exlimit=" .. MAX_CANDIDATES
+            .. "&prop=extracts|pageprops&ppprop=disambiguation&explaintext=1&exintro=1&exlimit=" .. MAX_CANDIDATES
             .. "&redirects=1&format=json&formatversion=2"
     end
     if ENGINES[engine] and ENGINES[engine].needsConverttitles(lang) then
@@ -1216,10 +1311,125 @@ function DualWiki:fetchCandidates(q, engine, lang, mode)
         return nil
     end
     local ok_json, data = pcall(JSON.decode, body)
-    if not ok_json or type(data) ~= "table" or not data.query or type(data.query.pages) ~= "table" then
+    if not ok_json or type(data) ~= "table" then
+        return nil
+    end
+    -- v1.3.3 (A3): keep the spell-correction suggestion for the failure
+    -- path (cleared per lookup; only ever consumed by showRetryDialog).
+    if mode == "search" and type(data.query) == "table" and type(data.query.searchinfo) == "table" then
+        self._last_suggestion = type(data.query.searchinfo.suggestion) == "string"
+            and data.query.searchinfo.suggestion or nil
+    end
+    if not data.query or type(data.query.pages) ~= "table" then
         return nil
     end
     return parseCandidatePages(data, q)
+end
+
+-- v1.3.3 (A1): expand a disambiguation page into its items. The dab page's
+-- own section-0 wikitext carries the curated "item - description" bullets
+-- in MEDIAWIKI SOURCE ORDER — the editor's semantic ranking. prop=links is
+-- unusable here: it is anon-capped (pllimit ≤10) and reorders entries, so
+-- on ja.wp the marquee 灼眼のシャナ fell outside the slice and on en.wp
+-- "Anna Kavan" outranked the planet. Bullet titles are exact article
+-- titles, so ONE batched intro-extract pass fills every item's definition
+-- (exintro mode allows exlimit beyond the full-text clamp of 1). Any
+-- failure degrades to the original dab result set (expandDisambiguation).
+function DualWiki:fetchDisambiguationItems(dab_title, engine, lang)
+    if ENGINES[engine] and ENGINES[engine].fullTextViaParse then return nil end
+    -- action=parse is NOT a query action — build the URL directly instead
+    -- of buildApiURL (which would emit a duplicate action=query).
+    local cfg = ENGINES[engine]
+    local wt_url = cfg.api(lang)
+        .. "?action=parse&prop=wikitext&section=0&redirects=1&page="
+        .. socket_url.escape(dab_title) .. "&format=json&formatversion=2"
+    local ok, body = httpGet(wt_url, PROBE_TIMEOUT)
+    if not ok or not body then
+        self._last_error_kind = type(body) == "string" and body or "error"
+        return nil
+    end
+    local ok_json, data = pcall(JSON.decode, body)
+    if not ok_json or type(data) ~= "table" or type(data.parse) ~= "table"
+        or type(data.parse.wikitext) ~= "string" then
+        return nil
+    end
+
+    local titles = {}
+    local seen = {}
+    for line in data.parse.wikitext:gmatch("[^\n]+") do
+        if #titles >= 8 then break end
+        local s = line:match("^%*+%s*(.*)$")
+        if not s or s == "" then
+            if #titles > 0 then break end
+        else
+            -- Leading-link rule: accept only when the bullet begins with a
+            -- title link and the link is followed by punctuation/space
+            -- (",", "-", "(", end-of-line). That captures curated items
+            -- like "[[Mercury (planet)]], …" and "[[シャナ (フランス)]] (Chanas) - …",
+            -- while rejecting prose-start bullets such as "[[英語圏]]の女性名…"
+            -- where the link is part of the description, not the item title.
+            local item
+            local link, tail = s:match("^%[%[([^%]|#]+)%]%](.*)$")
+            if link then
+                local lead = (tail or "")
+                if lead == "" or lead:match("^%s*[,;:%.%-–—%(%)%[%{]" ) then
+                    item = link
+                end
+            end
+            if item and not seen[item]
+                and not item:match("^File:") and not item:match("^Category:")
+                and not item:match("^Template:") and not item:match("^User:")
+                and not item:match("^Wikipedia:") and not item:match("^Portal:")
+                and not item:match("^Help:") then
+                seen[item] = true
+                titles[#titles + 1] = item
+            end
+        end
+    end
+    if #titles < 2 then return nil end
+
+    local ext_url = buildApiURL(engine, lang,
+        "&prop=extracts&explaintext=1&exintro=1&exlimit=10&redirects=1&titles="
+        .. socket_url.escape(table.concat(titles, "|")) .. "&format=json&formatversion=2")
+    local extracts = {}
+    local ok2, body2 = httpGet(ext_url, PROBE_TIMEOUT)
+    if ok2 and body2 then
+        local okj2, data2 = pcall(JSON.decode, body2)
+        if okj2 and type(data2) == "table" and type(data2.query) == "table"
+            and type(data2.query.pages) == "table" then
+            for _, page in ipairs(data2.query.pages) do
+                if type(page) == "table" and type(page.title) == "string" and type(page.extract) == "string" then
+                    extracts[caseFold(page.title)] = page.extract
+                end
+            end
+        end
+    end
+    local cands = {}
+    for i, t in ipairs(titles) do
+        cands[i] = {
+            title = t,
+            extract = extracts[caseFold(t)] or "",
+            index = i,
+            exact = false,
+            dab_item = true,
+        }
+    end
+    return cands
+end
+
+-- v1.3.3 (A1): if the winning top candidate is a disambiguation page,
+-- replace the result set with the dab page's items. The dab page itself
+-- carries no readable body — its link list IS the candidate set the user
+-- needs. Falls back to the original list on any expansion failure.
+function DualWiki:expandDisambiguation(cands, engine, lang)
+    if type(cands) ~= "table" or not cands[1] or not cands[1].dab then
+        return cands
+    end
+    local items = self:fetchDisambiguationItems(cands[1].title, engine, lang)
+    if type(items) == "table" and #items > 0 then
+        return items
+    end
+    return cands
 end
 
 -- Direct single-page full-article fetch (used by same-word pencil confirm).
@@ -1310,6 +1520,7 @@ local ERROR_HINTS = {
 
 -- Degradation ladder (each step is a single merged request):
 --   1. prefixsearch(sanitized query)
+--   1b. bare-word elision probe (fr/it/pt), challenging Stage 1 pre-verdict
 --   2. prefixsearch(query minus ONE trailing particle, language-aware)
 --   3. en.wikipedia retry for pure-Latin queries on zh
 --   4. top candidate carries real content (server-side redirect targets)
@@ -1318,6 +1529,18 @@ local ERROR_HINTS = {
 function DualWiki:queryPipeline(word, engine, lang)
     local q0 = sanitizeQuery(word)
     if q0 == "" then q0 = word end
+    -- v1.3.3 (B7): selection script routing. A zh-defaulted book receiving a
+    -- clearly non-CJK selection goes straight to the matching wikipedia
+    -- language — previously a Latin selection burned the zh probe (up to 3
+    -- requests) before Stage 3's fallback kicked in. Explicit language locks
+    -- are honored (checked in lookup(), which owns the lock context) and
+    -- Stage 3 stays as the locked-zh safety net.
+    if engine == "wikipedia" and lang == "zh" and not self:_isLangLocked() then
+        local routed = routeLangForScript(q0)
+        if routed then
+            lang = routed
+        end
+    end
     local plang = ENGINES[engine] and ENGINES[engine].particleLang(lang) or "zh"
     local q2 = stripTrailingParticle(q0, plang)
 
@@ -1340,16 +1563,19 @@ function DualWiki:queryPipeline(word, engine, lang)
     -- (a TV movie) and would win the verdict, burying the intended
     -- Équation entry behind the elision strip. The bare-word probe runs
     -- first here; an exact bare hit beats the elided-prefix noise.
+    -- v1.3.3 (A1): a winning disambiguation page is not a usable answer —
+    -- its value IS the item list. Every accepted return below funnels
+    -- through expandDisambiguation (graceful fallback to the raw set).
     local q3 = stripLeadingElision(q0, plang)
     if q3 ~= q0 and not self._moegirl_unreachable then
         local r3 = self:fetchCandidates(q3, engine, lang, "prefix")
         if hasGoodHit(r3, q3, plang) then
-            return r3, false
+            return self:expandDisambiguation(r3, engine, lang), false
         end
     end
 
     if hasGoodHit(r1, q0, plang) then
-        return r1, false
+        return self:expandDisambiguation(r1, engine, lang), false
     end
 
     -- Stage 2: trailing-particle drop retry (量子力学的 → 量子力学,
@@ -1360,7 +1586,7 @@ function DualWiki:queryPipeline(word, engine, lang)
     if q2 ~= q0 and utf8Len(q2) >= 2 and not self._moegirl_unreachable then
         r2 = self:fetchCandidates(q2, engine, lang, "prefix")
         if hasGoodHit(r2, q2, plang) then
-            return r2, false
+            return self:expandDisambiguation(r2, engine, lang), false
         end
     end
 
@@ -1375,7 +1601,7 @@ function DualWiki:queryPipeline(word, engine, lang)
     -- guard rejects moegirl's kana quirk (シャナの → Shanna).
     if r1 and r1[1] and #(r1[1].extract or "") >= 60
         and sharesPrefix(r1[1].title, q0, plang) then
-        return r1, false
+        return self:expandDisambiguation(r1, engine, lang), false
     end
 
     -- Stage 5: full-text search fallback (catches dab-page tops like
@@ -1386,7 +1612,7 @@ function DualWiki:queryPipeline(word, engine, lang)
         s = self:fetchCandidates(q0, engine, lang, "search")
     end
     if s and #s > 0 and sharesPrefixAny(s, q2 ~= q0 and q2 or q0, plang) then
-        return s, false
+        return self:expandDisambiguation(s, engine, lang), false
     end
 
     -- Stage 6 (cross-engine synergy): moegirl zero-hits or transport failures
@@ -1405,10 +1631,10 @@ function DualWiki:queryPipeline(word, engine, lang)
 
     -- Stage 7: surface whatever prefix noise we had (better than nothing).
     if r1 and #r1 > 0 then
-        return r1, false
+        return self:expandDisambiguation(r1, engine, lang), false
     end
     if r2 and #r2 > 0 then
-        return r2, false
+        return self:expandDisambiguation(r2, engine, lang), false
     end
 
     return nil, false
@@ -1429,6 +1655,21 @@ function DualWiki:lookup(word, engine, word_boxes, lang, want_full)
     -- only on display), otherwise a stale "timeout" hint from an earlier
     -- failed query would be attached to a later zero-hit "not found" dialog.
     self._last_error_kind = nil
+    -- v1.3.3 (A3): a suggestion is only ever valid for the query round that
+    -- produced it; clear up front so a later failure can't inherit it.
+    self._last_suggestion = nil
+
+    -- v1.3.3 (B7): resolve the selection's script BEFORE showing the
+    -- progress dialog, so the routed engine label (e.g. Wikipedia (EN) for a
+    -- Latin selection in a zh book) is what the user sees. Idempotent with
+    -- the queryPipeline-level check (which re-runs for recursive ladders);
+    -- both defer to _isLangLocked so explicit locks always win.
+    if engine == "wikipedia" and lang == "zh" and not self:_isLangLocked() then
+        local routed = routeLangForScript(sanitizeQuery(word))
+        if routed then
+            lang = routed
+        end
+    end
 
     -- v1.3.0: session lookup cache — repeat lookups of the same word/engine/
     -- lang in this ReaderUI session skip the network entirely. Capped, and
@@ -1517,6 +1758,12 @@ function DualWiki:showResult(word, cands, engine, word_boxes, lang, is_full)
             -- and "top right" pins its location (user-acceptance finding).
             definition = _("Candidate match. Tap the pencil icon at the top right to load the full article.")
         end
+        -- v1.3.3 (A1): dab-expansion entries are one of several senses;
+        -- tag the definition line so the reader knows they are browsing an
+        -- index, not the single best article.
+        if cand.dab_item then
+            definition = "【" .. _("Disambiguation entry") .. "】" .. LF .. definition
+        end
         results[i] = {
             word = cand.title,
             definition = definition,
@@ -1559,6 +1806,21 @@ function DualWiki:showResult(word, cands, engine, word_boxes, lang, is_full)
     UIManager:show(window)
 end
 
+-- v1.3.3 (A3): a one-tap button that re-queries the spelling suggestion
+-- MediaWiki returned on the failed round (captured in fetchCandidates,
+-- cleared at each lookup start).
+function DualWiki:_retrySuggestionButton(suggestion, engine, word_boxes, lang)
+    local retry_dialog
+    retry_dialog = {
+        text = T(_("Try \"%1\""), suggestion),
+        callback = function()
+            UIManager:close(retry_dialog)
+            self:lookup(suggestion, engine, word_boxes, lang)
+        end,
+    }
+    return retry_dialog
+end
+
 function DualWiki:showRetryDialog(failed_word, engine, word_boxes, lang)
     local cfg = ENGINES[engine]
     if not cfg then return end
@@ -1582,44 +1844,60 @@ function DualWiki:showRetryDialog(failed_word, engine, word_boxes, lang)
     local error_description = kind and ERROR_HINTS[kind] or nil
     self._last_error_kind = nil
 
+    -- v1.3.3 (A3): "did you mean" — a MediaWiki spelling suggestion rides
+    -- the failed round; offer a one-tap re-query. Cleared on read so a stale
+    -- suggestion never resurfaces for a later, unrelated failure.
+    local suggestion = self._last_suggestion
+    self._last_suggestion = nil
+    if suggestion and suggestion ~= failed_word
+        and caseFold(suggestion) ~= caseFold(failed_word) then
+        local hint = T(_("Did you mean: %1?"), suggestion)
+        error_description = error_description
+            and (error_description .. LF .. hint) or hint
+    end
+
     local retry_dialog
+    local buttons = { {} }
+    if suggestion and suggestion ~= failed_word
+        and caseFold(suggestion) ~= caseFold(failed_word) then
+        buttons[1] = { self:_retrySuggestionButton(suggestion, engine, word_boxes, lang) }
+    end
+    table.insert(buttons, {
+        {
+            text = _("Cancel"),
+            id = "close",
+            callback = function()
+                UIManager:close(retry_dialog)
+            end,
+        },
+        {
+            text = switch_btn_text,
+            callback = function()
+                local query = retry_dialog:getInputText()
+                UIManager:close(retry_dialog)
+                if query and query ~= "" then
+                    self:lookup(query, target or "wikipedia", word_boxes, switch_lang)
+                end
+            end,
+        },
+        {
+            text = _("Retry"),
+            is_enter_default = true,
+            callback = function()
+                local query = retry_dialog:getInputText()
+                if query and query ~= "" then
+                    UIManager:close(retry_dialog)
+                    self:lookup(query, engine, word_boxes, lang)
+                end
+            end,
+        },
+    })
     retry_dialog = InputDialog:new{
         title = string.format("%s · %s", cfg.label(lang), _("Not found, modify and retry:")),
         description = error_description,
         input = failed_word,
         input_type = "text",
-        buttons = {
-            {
-                {
-                    text = _("Cancel"),
-                    id = "close",
-                    callback = function()
-                        UIManager:close(retry_dialog)
-                    end,
-                },
-                {
-                    text = switch_btn_text,
-                    callback = function()
-                        local query = retry_dialog:getInputText()
-                        UIManager:close(retry_dialog)
-                        if query and query ~= "" then
-                            self:lookup(query, target or "wikipedia", word_boxes, switch_lang)
-                        end
-                    end,
-                },
-                {
-                    text = _("Retry"),
-                    is_enter_default = true,
-                    callback = function()
-                        local query = retry_dialog:getInputText()
-                        if query and query ~= "" then
-                            UIManager:close(retry_dialog)
-                            self:lookup(query, engine, word_boxes, lang)
-                        end
-                    end,
-                },
-            },
-        },
+        buttons = buttons,
     }
     UIManager:show(retry_dialog)
     retry_dialog:onShowKeyboard()

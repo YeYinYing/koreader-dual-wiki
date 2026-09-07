@@ -35,6 +35,15 @@ msgstr "ウィキペディアを検索（日本語）"
 msgid "Wikipedia lookup (%1)"
 msgstr "ウィキペディアを検索（%1）"
 
+msgid "Disambiguation entry"
+msgstr "曖昧さ回避の項目"
+
+msgid "Did you mean: %1?"
+msgstr "もしかして: %1"
+
+msgid "Try \"%1\""
+msgstr "「%1」を検索"
+
 msgid "Fandom lookup"
 msgstr "Fandom を検索"
 

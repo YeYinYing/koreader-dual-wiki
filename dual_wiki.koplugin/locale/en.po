@@ -50,6 +50,15 @@ msgstr "Wikipedia lookup (English)"
 msgid "Wikipedia lookup (%1)"
 msgstr "Wikipedia lookup (%1)"
 
+msgid "Disambiguation entry"
+msgstr "Disambiguation entry"
+
+msgid "Did you mean: %1?"
+msgstr "Did you mean: %1?"
+
+msgid "Try \"%1\""
+msgstr "Try \"%1\""
+
 msgid "Wikipedia lookup (Japanese)"
 msgstr "Wikipedia lookup (Japanese)"
 

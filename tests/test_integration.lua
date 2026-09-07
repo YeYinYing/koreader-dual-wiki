@@ -72,7 +72,28 @@ end
 
 local function assertPipeline(name, word, engine, lang, expect_find, expect_title)
     throttle()
-    local cands = retry429(function() return dw:queryPipeline(word, engine, lang) end)
+    -- Bounded retry: this suite fires many back-to-back requests and the
+    -- Wikimedia edge 429s aggressively, which can poison ONE probe (e.g. the
+    -- Stage 1b elision probe degrading to literal-prefix noise). Retry the
+    -- whole ladder; a genuine regression fails all three attempts anyway.
+    local function attempt()
+        return retry429(function() return dw:queryPipeline(word, engine, lang) end)
+    end
+    local cands = attempt()
+    local attempt_no = 1
+    local function degraded()
+        if type(cands) ~= "table" or #cands == 0 then return true end
+        local title = tostring(cands[1].title or "")
+        if expect_title and not expect_title(title) then return true end
+        if expect_find and not title:find(expect_find, 1, true) then return true end
+        return false
+    end
+    while degraded() and attempt_no < 3 do
+        attempt_no = attempt_no + 1
+        print("  .. " .. name .. " degraded (attempt " .. attempt_no .. "/3), backing off 10 s ..")
+        socket.sleep(10)
+        cands = attempt()
+    end
     if type(cands) ~= "table" or #cands == 0 then
         fail(name, "no candidates: " .. tostring(cands))
         return nil
@@ -140,7 +161,34 @@ print("== queryPipeline across languages (real network) ==")
 assertPipeline("zh particle retry (量子力学的→量子力学)", "量子力学的", "wikipedia", "zh", "量子力学")
 assertPipeline("zh exact (人工智能)", "人工智能", "wikipedia", "zh", "人工智能")
 assertPipeline("en word-boundary (quantum entanglement)", "quantum entanglement", "wikipedia", "en", "Quantum")
-assertPipeline("ja kana (シャナ)", "シャナ", "wikipedia", "ja", "シャナ")
+-- v1.3.3 A1: dab expansion runs after earlier probes, so a 429 can hit the
+-- wikitext parse and silently degrade back to the raw dab page (retry429
+-- cannot detect that). Allow a bounded retry when the expansion degraded.
+do
+    local ok_shana = false
+    for attempt = 1, 3 do
+        throttle()
+        local cands = retry429(function() return dw:queryPipeline("シャナ", "wikipedia", "ja") end)
+        local found = false
+        for _, c in ipairs(cands or {}) do
+            if c.title == "灼眼のシャナ" then
+                found = true
+                break
+            end
+        end
+        if found then
+            ok_shana = true
+            break
+        end
+        print("  .. ja dab expansion degraded (top="
+            .. tostring(cands and cands[1] and cands[1].title) .. "), retrying ..")
+    end
+    if ok_shana then
+        pass("ja dab expansion (シャナ) includes 灼眼のシャナ")
+    else
+        fail("ja dab expansion (シャナ)", "missing 灼眼のシャナ after 3 attempts")
+    end
+end
 assertPipeline("de (Quantenmechanik)", "Quantenmechanik", "wikipedia", "de", nil)
 assertPipeline("fr (philosophie)", "philosophie", "wikipedia", "fr", nil)
 assertPipeline("es (historia de Roma)", "historia de Roma", "wikipedia", "es", nil)
@@ -156,6 +204,41 @@ assertPipeline("fr capital elision (L'équation→Équation)", "L'équation", "w
     function(title) return title == "Équation" end)
 assertPipeline("fr lower elision (l'équation→Équation)", "l'équation", "wikipedia", "fr", nil,
     function(title) return title == "Équation" end)
+
+print("== v1.3.3 search quality (real network) ==")
+-- A1: en.wikipedia "Mercury" is a Disambiguator-flagged page whose extract
+-- is a bare item index; the pipeline must swap it for the dab items (in
+-- document order, batched intro extracts) instead of surfacing the index.
+do
+    throttle()
+    local cands = retry429(function() return dw:queryPipeline("Mercury", "wikipedia", "en") end)
+    local n = type(cands) == "table" and #cands or 0
+    local top = n > 0 and tostring(cands[1].title) or "?"
+    if n >= 2 and top ~= "Mercury" and cands[1].dab_item then
+        pass("en dab expansion (Mercury → " .. n .. " items, top: " .. top .. ")")
+    else
+        fail("en dab expansion (Mercury)",
+            "n=" .. n .. " top=" .. top .. " dab_item=" .. tostring(cands and cands[1] and cands[1].dab_item))
+    end
+end
+-- A3: MediaWiki spell correction piggybacks on the search request
+-- (gsrinfo=suggestion; NOTE: srinfo= is the list=search spelling and is
+-- NOT emitted on generator=search — verified live 2026-09-07).
+do
+    throttle()
+    retry429(function() return dw:fetchCandidates("Catte", "wikipedia", "en", "search") end)
+    local sugg = dw._last_suggestion
+    if type(sugg) == "string" and sugg:lower():find("cattle", 1, true) then
+        pass("did-you-mean (Catte → " .. sugg .. ")")
+    else
+        fail("did-you-mean (Catte)", tostring(sugg))
+    end
+end
+-- B5: European phrase particles feed Stage 2's fallback probe. fr.wikipedia
+-- prefix-matches "Histoire de …" titles, so Stage 1 usually preempts; this
+-- case pins the ladder behavior end-to-end (no crash, sane top hit).
+assertPipeline("fr phrase particle (histoire de → Histoire…)", "histoire de", "wikipedia", "fr", nil,
+    function(title) return title:find("^Histoire") ~= nil end)
 
 print("== moegirl (ACG engine, wikipedia degradation allowed) ==")
 do
@@ -252,8 +335,137 @@ do
     if ok_fields then
         pass("results carry string `dict` field (scroll-crash regression)")
     end
+    -- v1.3.3 (A1): dab-expansion entries carry the disambiguation tag on
+    -- their definition line so the reader knows they are browsing an index.
+    local tagged = 0
+    for _, r in ipairs(w.results) do
+        if tostring(r.definition):find("Disambiguation entry", 1, true) then
+            tagged = tagged + 1
+        end
+    end
+    dw:showResult("Mercury", {
+        { title = "Mercury (planet)", extract = "The closest planet to the Sun.", dab_item = true },
+        { title = "Mercury (element)", extract = "", dab_item = true },
+    }, "wikipedia", nil, "en", false)
+    local w2 = shown[#shown]
+    local all_tagged = true
+    for _, r in ipairs(w2.results) do
+        if not tostring(r.definition):find("Disambiguation entry", 1, true) then
+            all_tagged = false
+        end
+    end
+    if all_tagged and #w2.results == 2 and tagged == 0 then
+        pass("dab items tagged with Disambiguation entry (plain results untagged)")
+    else
+        fail("dab items tagged with Disambiguation entry",
+            "tagged=" .. tagged .. " all_tagged=" .. tostring(all_tagged))
+    end
     package.loaded["ui/widget/dictquicklookup"] = nil
     dw.ui = nil
+end
+
+-- 2c. v1.3.3 B7+A1 COMBINED: a zh-defaulted lookup of a pure-Latin selection
+-- must route to en.wikipedia BEFORE the first request (the result window
+-- carries the routed label) and the dab-topped result set must arrive
+-- expanded. Exercises the full lookup() path with a synchronous scheduler.
+do
+    local UM = package.loaded["ui/uimanager"]
+    local old_scheduleIn = UM.scheduleIn
+    UM.scheduleIn = function(_, _, fn) fn() end
+    local sw = stub_class
+    package.loaded["ui/widget/infomessage"] = { new = function() return sw end }
+    package.loaded["ui/widget/dictquicklookup"] = sw
+    local shown = {}
+    package.loaded["ui/widget/dictquicklookup"].new = function(_, opts)
+        shown[#shown + 1] = opts
+        return opts
+    end
+    -- No per-book settings; clear any global language lock so auto mode is
+    -- in effect (script routing must respect explicit locks).
+    if G_reader_settings:readSetting("dualwiki_lang") ~= nil then
+        G_reader_settings:delSetting("dualwiki_lang")
+    end
+    dw._lookup_cache = nil
+    dw.ui = { dialog = {}, highlight = nil }
+
+    dw:lookup("Mercury", "wikipedia", nil, "zh", false)
+    local w = shown[#shown]
+    if type(w) ~= "table" or type(w.results) ~= "table" or #w.results == 0 then
+        fail("B7 script routing + dab expansion (Mercury via zh lookup)", "no results shown")
+    else
+        local label_ok = w.results[1].dict == "Wikipedia (EN)"
+        local expanded = #w.results >= 2 and w.results[1].word ~= "Mercury"
+        if label_ok and expanded then
+            pass("B7 routes zh→en + dab expansion (dict=" .. w.results[1].dict
+                .. ", " .. #w.results .. " items, top: " .. tostring(w.results[1].word) .. ")")
+        else
+            fail("B7 script routing + dab expansion (Mercury via zh lookup)",
+                "dict=" .. tostring(w.results[1].dict) .. " items=" .. #w.results
+                .. " top=" .. tostring(w.results[1].word))
+        end
+    end
+
+    dw.ui = nil
+    dw._lookup_cache = nil
+    package.loaded["ui/widget/dictquicklookup"] = nil
+    UM.scheduleIn = old_scheduleIn
+end
+
+-- 2d. v1.3.3 A3 UI binding: a captured spelling suggestion must surface as
+-- a one-tap button in the retry dialog (and be absent when there is none).
+do
+    local dlg_stub = setmetatable({}, { __index = function() return function() end end })
+    local dialogs = {}
+    -- Mutate the module table main.lua captured at load (do NOT replace it,
+    -- as with the other UI stubs in this harness).
+    package.loaded["ui/widget/inputdialog"].new = function(_, opts)
+        dialogs[#dialogs + 1] = opts
+        return dlg_stub
+    end
+    dw.ui = { dialog = {}, highlight = nil }
+
+    dw._last_suggestion = "cattle"
+    dw:showRetryDialog("Catte", "wikipedia", nil, "en")
+    local d1 = dialogs[#dialogs]
+    local suggestion_btn
+    if d1 and type(d1.buttons) == "table" then
+        for _, row in ipairs(d1.buttons) do
+            for _, b in ipairs(row) do
+                if tostring(b.text):find("cattle", 1, true) then
+                    suggestion_btn = b
+                end
+            end
+        end
+    end
+    local desc_ok = d1 and tostring(d1.description or ""):find("cattle", 1, true) ~= nil
+    if suggestion_btn and desc_ok then
+        pass("retry dialog surfaces did-you-mean button + description")
+    else
+        fail("retry dialog surfaces did-you-mean button + description",
+            "btn=" .. tostring(suggestion_btn and suggestion_btn.text) .. " desc=" .. tostring(d1 and d1.description))
+    end
+
+    dw._last_suggestion = nil
+    dw:showRetryDialog("Catte", "wikipedia", nil, "en")
+    local d2 = dialogs[#dialogs]
+    local stray = false
+    if d2 and type(d2.buttons) == "table" then
+        for _, row in ipairs(d2.buttons) do
+            for _, b in ipairs(row) do
+                if tostring(b.text):find("cattle", 1, true) then
+                    stray = true
+                end
+            end
+        end
+    end
+    if not stray then
+        pass("retry dialog omits suggestion button when none captured")
+    else
+        fail("retry dialog omits suggestion button when none captured", "stray button present")
+    end
+
+    dw.ui = nil
+    package.loaded["ui/widget/inputdialog"].new = function() return stub_class end
 end
 
 if failures > 0 then

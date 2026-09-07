@@ -27,6 +27,7 @@ return {
     hasGoodHit = hasGoodHit,
     sharesPrefix = sharesPrefix,
     caseFold = caseFold,
+    routeLangForScript = routeLangForScript,
     parseCandidatePages = parseCandidatePages,
     normalizeLang = normalizeLang,
     zhVariantOf = zhVariantOf,
@@ -149,6 +150,37 @@ end)(), "Équation")
 
 print("== v1.3.2 省音与助词叠加 ==")
 check("E12 叠拆：l'équation的 → équation", api.stripTrailingParticle(api.stripLeadingElision("l'équation的", "fr"), "zh"), "équation")
+
+print("== v1.3.3 B5 phrase particles (fr/es/it/de) ==")
+check("P1 fr de Gaulle 不剥", api.stripTrailingParticle("de Gaulle", "fr"), "de Gaulle")
+check("P2 fr L'histoire de → L'histoire", api.stripTrailingParticle("L'histoire de", "fr"), "L'histoire")
+check("P3 fr 大写 DE 照剥", api.stripTrailingParticle("Histoire DE", "fr"), "Histoire")
+check("P4 es historia del → historia", api.stripTrailingParticle("historia del", "es"), "historia")
+check("P5 it della 按词剥", api.stripTrailingParticle("Guerra della", "it"), "Guerra")
+check("P6 de theorie der → theorie", api.stripTrailingParticle("Theorie der", "de"), "Theorie")
+check("P7 fr Rome 不剥", api.stripTrailingParticle("histoire de Rome", "fr"), "histoire de Rome")
+check("P8 剩余不足2字不剥", api.stripTrailingParticle("à de", "fr"), "à de")
+
+print("== v1.3.3 B7 routeLangForScript (选区脚本自检) ==")
+check("R1 纯拉丁→en", api.routeLangForScript("Quantum mechanics"), "en")
+check("R2 西里尔→ru", api.routeLangForScript("Квантовая механика"), "ru")
+check("R3 纯假名→ja", api.routeLangForScript("シャナ"), "ja")
+check("R4 CJK 汉字→nil", api.routeLangForScript("量子力学"), nil)
+check("R5 CJK+假名混合→nil", api.routeLangForScript("灼眼のシャナ"), nil)
+check("R6 数字标点→nil", api.routeLangForScript("3.14!"), nil)
+check("R7 重音拉丁→en", api.routeLangForScript("L'équation"), "en")
+check("R8 过短→nil", api.routeLangForScript("A"), nil)
+
+print("== v1.3.3 A1 parseCandidatePages dab flag ==")
+do
+    local dab = api.parseCandidatePages({ query = { pages = {
+        { title = "Mercury", ns = 0, index = 1, pageprops = { disambiguation = "" } },
+        { title = "Mercury (planet)", ns = 0, index = 2 },
+    } } }, "Mercury")
+    check("D1 dab 标记", dab and dab[1] and dab[1].dab, true)
+    check("D2 exact 仍居首", dab and dab[1] and dab[1].title, "Mercury")
+    check("D3 非 dab 无标记", dab and dab[2] and dab[2].dab, nil)
+end
 
 print("== Phase 1 mishit guards ==")
 check("M1 (G)I-DLE 括号不动", api.sanitizeQuery("(G)I-DLE"), "(G)I-DLE")
