@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased] — v1.3.3 search-quality candidate
+## [1.3.3] - 2026-09-07 — search quality & reader ergonomics
 
 ### Added
 
@@ -8,12 +8,27 @@
 - **"Did you mean" suggestions** (A3): the Stage-5 search request carries `gsrinfo=suggestion`; when the whole ladder misses, the retry dialog shows a translated hint line (`您是不是要找：%1？`) and a one-tap `试查"%1"` button. Captured per-lookup round and cleared on read (a stale suggestion can never attach to a later failure).
 - **European phrase particles** (B5): a second, word-level trailing-stopword table (`PHRASE_PARTICLES`, fr/es/it/de) feeds Stage 2's fallback — `L'histoire de` → `L'histoire`, `Theorie der` → `Theorie`. Matched case-insensitively via `caseFold`, whole tokens only (leading space required — `de Gaulle` survives), remainder ≥2 chars. Char-level `PARTICLES` still win first.
 - **Selection script routing** (B7): `routeLangForScript` sniffs pure-Latin / pure-Cyrillic / pure-kana selections; a zh-defaulted book receiving such a selection routes straight to en/ru/ja.wikipedia BEFORE the first request (the result window label follows the routed language). Previously a Latin selection burned the zh probe (up to 3 requests) before Stage 3's fallback. Explicit language locks (per-book or global) are honored — routing only refines auto-detected languages; Stage 3 stays as the locked-zh safety net.
+- **Italian elision + German fusional contractions** (E3): the Stage-1b bare-word probe now also strips Italian articulated prepositions (`dell'arte` → `arte`, `sull'isola` → `isola`; longest-match keeps `dell'` ahead of `d'`) and German leading fusions as a separate word-level pass (`zum Beispiel` → `Beispiel`, `Im Wald` → `Wald`; the trailing space in each pattern stops `Immer` from matching `im`). Fallback-only — titles genuinely starting with these forms hit exactly in Stage 1 and are never disturbed.
+- **Sitelink notability re-rank** (E1): when NO exact hit exists and the top candidate is content-thin (<60 chars), one batched `wbgetentities` call fetches sitelink counts for every `wikibase_item` QID (piggybacked on the same probe request) and a clearly-more-notable entity (≥2× links, ≥8 wikis) is promoted to the front — `Bande` → the disambiguated primary topic instead of stub noise. Hard red lines: exact hits and dab pages are NEVER re-ranked; any failure keeps the server order.
+- **Cross-language bridge** (E2): for wikipedia results whose language differs from the book's (or any non-zh result when reading a zh book), one `prop=langlinks` call on the top candidate appends the equivalent article as a trailing pseudo-entry (`→ 目标标题`); its pencil loads the full text in the target language directly. Silent on any failure.
+- **Preferred engine per book** (E9): settings gain `首选引擎（本书）/（全局默认）` radio pickers. An explicit choice pins that engine's button into slot 1 (per-book wins over global); the remaining default-plan entry fills slot 2.
+- **Highlight prewarm** (E8): when the highlight menu opens, the primary button's query is prefetched silently after a 600 ms debounce into the session cache (skipped when a fresh negative entry exists), so tapping the button replays a cache hit — the result window appears near-instantly. Toggle in settings, default on; never shows UI or error state.
+- **Wikidata pencil bridge** (E4): candidates now carry their `wikibase_item` QID; the pencil on such a candidate resolves the entity's sitelinks (book language → zh → en) and loads that article's full text. No usable sitelink falls back to the search dialog — the pencil never dead-ends.
+- **TLS keepalive pool** (E7): new `keepalive.lua` module keeps one idle TLS connection per wiki host and speaks HTTP/1.1 (Content-Length + chunked + close-delimited bodies, lowercase-folded headers, 2 MB abort cap preserved). Reuses measured in the integration suite (`opens=1, reuses=1` for back-to-back probes) save the 300-500 ms TCP+TLS handshake per request on e-ink devices. ANY anomaly — connect failure, mid-transfer break, oversized body, internal error — discards the socket and falls back to the legacy `ssl.https` path, which remains the single source of truth; `DUALWIKI_NO_KEEPALIVE` env (and a `keepalive.enabled` toggle for tests) pins the legacy transport. The pool is dropped on document close.
+- **Wider search fallback** (E5): the Stage-5 generator=search request widens from 4 to 8 candidates (`gsrlimit`/`exlimit` move together, still ONE request). True `gsroffset` paging stays deferred: DictQuickLookup offers no clean button-extension point for a "more" affordance.
+- **Negative lookup cache** (E6): a clean full-ladder miss (no transport error involved) is remembered for 180 s, so re-selecting the same dead word skips the ladder instead of re-burning 3+ requests (and the rate limiter's patience). Transport errors and Lua errors are never cached.
+
+### Fixed
+
+- **Dab item red links** (L1): bullets linking titles with no article yet (verified: 3 of ja `シャナ`'s items are red links) are now dropped via the batched extract response's `missing` flag — a pencil tap on them would have 404'd.
+- **Dab extracts for redirect items** (L2): items that are redirects resolve server-side to a different title; extracts now propagate from the response title back to the bullet title via the `redirects` map, so every kept item carries its summary.
+- **Dab item cap raised** (L3): 8 → 10 curated items; the batched extract pass tolerates it at the same `exlimit=20`, so more senses cost nothing extra.
 
 ### Infrastructure
 
-- Integration suite: dab-expansion contracts asserted against live en.wp (`Mercury → Mercury (planet)` top) and ja.wp (灼眼のシャナ present among シャナ's items), with a bounded 3-attempt retry because a 429 can silently degrade an expansion; `assertPipeline` itself retries degraded ladders (the Wikimedia edge 429s aggressively under this suite's request pattern, which once let a transient Stage-1b failure masquerade as the v1.3.2 elision regression).
-- Unit matrix: phrase-particle cases (fr/es/it/de × hit/no-hurt), `routeLangForScript` matrix (Latin/Cyrillic/kana/mixed/digits), dab-flag parsing, and `hasGoodHit`'s new dab-exact rule.
-- Locale: 3 new msgids (`Disambiguation entry`, `Did you mean: %1?`, `Try "%1"`) across zh_CN/zh_TW/ja/en; `messages.pot` synced; all `.mo` recompiled.
+- Integration suite: dab-expansion contracts asserted against live en.wp (`Mercury → Mercury (planet)` top) and ja.wp (灼眼のシャナ present among シャナ's items), with a bounded 3-attempt retry because a 429 can silently degrade an expansion; `assertPipeline` itself retries degraded ladders (the Wikimedia edge 429s aggressively under this suite's request pattern, which once let a transient Stage-1b failure masquerade as the v1.3.2 elision regression). New E7 section exercises the pool on the real network: sequential GETs reuse the socket, bodies stay valid, and a dead-port failure recovers cleanly.
+- Unit matrix: phrase-particle cases (fr/es/it/de × hit/no-hurt), `routeLangForScript` matrix (Latin/Cyrillic/kana/mixed/digits), dab-flag parsing + QID passthrough, German fusion strip, and a new `tests/test_keepalive.lua` covering the pure response-head parser (status line, header folding, chunk sizes, body-mode decision) — the socket IO itself is exercised only by the integration suite.
+- Locale: 9 msgids total across zh_CN/zh_TW/ja/en (60 translated each), `messages.pot` synced, all `.mo` recompiled.
 
 ## [1.3.2] - 2026-09-07
 

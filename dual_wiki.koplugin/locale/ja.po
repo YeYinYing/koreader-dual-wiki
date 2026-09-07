@@ -158,6 +158,21 @@ msgstr "セッション検索キャッシュをクリア"
 msgid "Session lookup cache cleared."
 msgstr "検索キャッシュをクリアしました。"
 
+msgid "Preferred engine (this book)"
+msgstr "優先エンジン（この本）"
+
+msgid "Preferred engine (global default)"
+msgstr "優先エンジン（グローバル）"
+
+msgid "Auto (book language plan)"
+msgstr "自動（本の言語に従う）"
+
+msgid "Prewarm lookup on highlight"
+msgstr "ハイライト時に検索を先行取得"
+
+msgid "Cross-language article. Tap the pencil icon at the top right to load it."
+msgstr "他言語の記事です。右上のペンアイコンをタップすると読み込みます。"
+
 msgid "Enter wiki subdomain"
 msgstr "Wiki サブドメインを入力"
 

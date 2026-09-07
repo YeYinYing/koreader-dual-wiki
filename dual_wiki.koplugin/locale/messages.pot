@@ -160,6 +160,21 @@ msgstr ""
 msgid "Session lookup cache cleared."
 msgstr ""
 
+msgid "Preferred engine (this book)"
+msgstr ""
+
+msgid "Preferred engine (global default)"
+msgstr ""
+
+msgid "Auto (book language plan)"
+msgstr ""
+
+msgid "Prewarm lookup on highlight"
+msgstr ""
+
+msgid "Cross-language article. Tap the pencil icon at the top right to load it."
+msgstr ""
+
 msgid "Enter wiki subdomain"
 msgstr ""
 

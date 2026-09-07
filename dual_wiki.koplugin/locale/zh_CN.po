@@ -158,6 +158,21 @@ msgstr "清除本次查询缓存"
 msgid "Session lookup cache cleared."
 msgstr "查询缓存已清除。"
 
+msgid "Preferred engine (this book)"
+msgstr "首选引擎（本书）"
+
+msgid "Preferred engine (global default)"
+msgstr "首选引擎（全局默认）"
+
+msgid "Auto (book language plan)"
+msgstr "自动（按书籍语种排布）"
+
+msgid "Prewarm lookup on highlight"
+msgstr "划选时预载查询"
+
+msgid "Cross-language article. Tap the pencil icon at the top right to load it."
+msgstr "跨语言词条：点右上角铅笔图标直接载入。"
+
 msgid "Enter wiki subdomain"
 msgstr "输入 wiki 子域"
 

@@ -24,6 +24,7 @@ return {
     sanitizeQuery = sanitizeQuery,
     stripTrailingParticle = stripTrailingParticle,
     stripLeadingElision = stripLeadingElision,
+    stripLeadingFusion = stripLeadingFusion,
     hasGoodHit = hasGoodHit,
     sharesPrefix = sharesPrefix,
     caseFold = caseFold,
@@ -123,6 +124,10 @@ check("E6 无省音原样", api.stripLeadingElision("amour", "fr"), "amour")
 check("E7 en 不适用", api.stripLeadingElision("o'clock", "en"), "o'clock")
 check("E8 it un'", api.stripLeadingElision("un'ora", "it"), "ora")
 check("E9 过短查询不剥", api.stripLeadingElision("l'a", "fr"), "l'a")
+check("E3b it dell'arte", api.stripLeadingElision("dell'arte", "it"), "arte")
+check("E3c it dell' 优先于 d'", api.stripLeadingElision("dell'arte", "it"), "arte")
+check("E3d it sull'isola", api.stripLeadingElision("sull'isola", "it"), "isola")
+check("E3e fr d' 不吞 dell", api.stripLeadingElision("d'hier", "fr"), "hier")
 check("E10 剩余不足2字回退", api.stripLeadingElision("d'\195\160", "fr"), "d'\195\160")
 check("E11 句首大写 L'Arc 照剥", api.stripLeadingElision("L'Arc", "fr"), "Arc")
 
@@ -174,13 +179,24 @@ check("R8 过短→nil", api.routeLangForScript("A"), nil)
 print("== v1.3.3 A1 parseCandidatePages dab flag ==")
 do
     local dab = api.parseCandidatePages({ query = { pages = {
-        { title = "Mercury", ns = 0, index = 1, pageprops = { disambiguation = "" } },
+        { title = "Mercury", ns = 0, index = 1, pageprops = { disambiguation = "", wikibase_item = "Q12345" } },
         { title = "Mercury (planet)", ns = 0, index = 2 },
     } } }, "Mercury")
     check("D1 dab 标记", dab and dab[1] and dab[1].dab, true)
     check("D2 exact 仍居首", dab and dab[1] and dab[1].title, "Mercury")
     check("D3 非 dab 无标记", dab and dab[2] and dab[2].dab, nil)
+    check("D4 qid 透传", dab and dab[1] and dab[1].qid, "Q12345")
 end
+
+print("== v1.3.3 E3 German fusional contractions (词级前导缩合) ==")
+check("F1 zum Beispiel → Beispiel", api.stripLeadingFusion("zum Beispiel", "de"), "Beispiel")
+check("F2 zur Sache → Sache", api.stripLeadingFusion("zur Sache", "de"), "Sache")
+check("F3 vom Winde → Winde", api.stripLeadingFusion("vom Winde", "de"), "Winde")
+check("F4 Immer 不误伤", api.stripLeadingFusion("Immer wieder", "de"), "Immer wieder")
+check("F5 Amsel 不误伤", api.stripLeadingFusion("Amsel", "de"), "Amsel")
+check("F6 非 de 不剥", api.stripLeadingFusion("zum Beispiel", "fr"), "zum Beispiel")
+check("F7 大写匹配", api.stripLeadingFusion("Zum Beispiel", "de"), "Beispiel")
+check("F8 过短不剥", api.stripLeadingFusion("im A", "de"), "im A")
 
 print("== Phase 1 mishit guards ==")
 check("M1 (G)I-DLE 括号不动", api.sanitizeQuery("(G)I-DLE"), "(G)I-DLE")

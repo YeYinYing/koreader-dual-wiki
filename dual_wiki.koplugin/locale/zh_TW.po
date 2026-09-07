@@ -158,6 +158,21 @@ msgstr "清除本次查詢快取"
 msgid "Session lookup cache cleared."
 msgstr "查詢快取已清除。"
 
+msgid "Preferred engine (this book)"
+msgstr "首選引擎（本書）"
+
+msgid "Preferred engine (global default)"
+msgstr "首選引擎（全域預設）"
+
+msgid "Auto (book language plan)"
+msgstr "自動（依書籍語種排佈）"
+
+msgid "Prewarm lookup on highlight"
+msgstr "劃選時預載查詢"
+
+msgid "Cross-language article. Tap the pencil icon at the top right to load it."
+msgstr "跨語言詞條：點右上角鉛筆圖示直接載入。"
+
 msgid "Enter wiki subdomain"
 msgstr "輸入 wiki 子網域"
 

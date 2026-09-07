@@ -53,6 +53,12 @@ if type(DualWiki) ~= "table" or type(DualWiki.queryPipeline) ~= "function" then
 end
 local dw = DualWiki:new{}
 
+-- v1.3.3 (E7): the keepalive pool bypasses ssl.https.request, which would
+-- silence the deterministic 429 stubs below. The stubbed-transport block
+-- disables the pool for its duration; a dedicated block afterwards exercises
+-- the pool against the REAL network (reuse + fallback contract).
+local keepalive = require("keepalive")
+
 -- Be polite to the wikis: the Wikimedia rate limiter counts per-IP across
 -- ALL wikis (observed: ru.wikipedia 429'd on its first request after a
 -- session of queries). Space requests out and retry 429s once with backoff.
@@ -112,6 +118,7 @@ local function assertPipeline(name, word, engine, lang, expect_find, expect_titl
 end
 
 print("== deterministic 429 auto-retry (stubbed transport, no network) ==")
+keepalive.enabled = false -- these stubs target the legacy ssl.https path
 do
     -- luasocket generic request returns (1, code, headers, status); the
     -- plugin's socket.skip(1, ...) drops the leading 1. Stub the https
@@ -156,6 +163,48 @@ do
         pass("persistent 429 -> nil, kind=http_429, exactly 2 requests")
     end
 end
+keepalive.enabled = true -- back on for the real-network sections below
+
+print("== v1.3.3 E7: keepalive pool (real network) ==")
+local httpGet = dw._httpGet
+do
+    local stats_before = { opens = keepalive._stats.opens, reuses = keepalive._stats.reuses }
+    local ok1, body1 = httpGet("https://en.wikipedia.org/w/api.php?action=query&meta=siteinfo&format=json", 10)
+    local ok2, body2 = httpGet("https://en.wikipedia.org/w/api.php?action=query&meta=siteinfo&format=json", 10)
+    if ok1 and ok2 then
+        pass("E7 two sequential https GETs via pool succeed")
+    else
+        fail("E7 sequential GETs", tostring(ok1) .. "/" .. tostring(ok2))
+    end
+    if ok1 and ok2 and keepalive._stats.reuses > stats_before.reuses then
+        pass("E7 second request reused the pooled socket (reuses="
+            .. keepalive._stats.reuses .. ", opens=" .. keepalive._stats.opens .. ")")
+    elseif ok1 and ok2 then
+        fail("E7 socket reuse", "reuses=" .. keepalive._stats.reuses
+            .. " opens=" .. keepalive._stats.opens .. " (no reuse observed)")
+    end
+    if ok1 and #body1 > 0 and body1:find('"enwiki"', 1, true) then
+        pass("E7 pooled body is a valid siteinfo JSON")
+    elseif ok1 then
+        fail("E7 pooled body shape", "missing enwiki marker")
+    end
+end
+do
+    -- pool must not leak sockets across a deliberate failure (bad port)
+    local ok_bad = httpGet("https://en.wikipedia.org:1/w/api.php?action=query&format=json", 4)
+    keepalive.clear()
+    local ok_next, body_next = httpGet("https://en.wikipedia.org/w/api.php?action=query&meta=siteinfo&format=json", 10)
+    if ok_next and #body_next > 0 then
+        pass("E7 pool recovers after a dead-port failure")
+    else
+        fail("E7 pool recovery", tostring(ok_next))
+    end
+    if ok_bad then
+        -- port 1 unlikely to answer; if it did, treat as env anomaly, not failure
+        print("  note: dead-port probe unexpectedly succeeded (host-level proxy?)")
+    end
+end
+keepalive.enabled = false -- real-network ladder sections stay on legacy transport
 
 print("== queryPipeline across languages (real network) ==")
 assertPipeline("zh particle retry (量子力学的→量子力学)", "量子力学的", "wikipedia", "zh", "量子力学")
