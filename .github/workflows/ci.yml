@@ -60,5 +60,6 @@ jobs:
           # Exact filename, NOT a glob: the repo tree carries historical
           # release zips (v1.3.0/v1.3.1), and koreader-dual-wiki-v*.zip
           # would attach those stale artifacts to every new release.
-          files: koreader-dual-wiki-v${{ github.ref_name }}.zip
+          # ref_name on a tag ref already includes the leading "v".
+          files: koreader-dual-wiki-${{ github.ref_name }}.zip
           fail_on_unmatched_files: true
