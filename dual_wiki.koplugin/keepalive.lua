@@ -10,13 +10,19 @@
 --
 -- Design contract with main.lua's httpGetOnce:
 --   request(url, timeout, max_bytes, user_agent)
---     -> nil                       module unavailable or non-https URL
---                                  (caller uses the legacy path, no state
---                                  was touched)
+--     -> nil                       module unavailable, non-https URL, or an
+--                                  internal (pcall-caught) anomaly — the
+--                                  ONLY signal that triggers the legacy
+--                                  fallback in the caller
 --     -> true, body, nil, headers  HTTP 2xx (body guaranteed non-empty)
---     -> false, kind, detail, hdrs same error kinds as httpGetOnce
+--     -> false, kind, detail, hdrs definitive verdict, trusted by the
+--                                  caller: same error kinds as httpGetOnce
 --                                  ("http_429" carries the headers table so
 --                                  Retry-After keeps working)
+-- A definitive verdict is never re-requested over the legacy path — that
+-- would double-hit 429 rate limits and double the latency on dead hosts.
+-- A stale REUSED socket (server closed it during idle) is absorbed inside:
+-- one silent retry on a fresh connection before any verdict is reported.
 --
 -- Test switch: set keepalive.enabled = false to force the legacy path.
 -- The response-head parser is a pure function, unit-tested directly.
@@ -45,14 +51,17 @@ local TLS_PARAMS = {
 
 if M.available then
     M._pool = {}   -- "host:port" -> { sock = <ssl socket>, idle_since = t }
-    M._stats = { opens = 0, reuses = 0, falls_back = 0 }
+    -- successes counts responses that traveled over the pool (NOT the
+    -- legacy path) — lets the integration suite prove the fast path was
+    -- actually exercised instead of silently falling back.
+    M._stats = { opens = 0, reuses = 0, stale_retries = 0, successes = 0 }
 end
 
 -- ------------------------------------------------------------------ pure --
 -- "HTTP/1.1 200 OK" -> 200, "OK" (nil on garbage)
 function M.parse_status_line(line)
     if type(line) ~= "string" then return nil end
-    local major, minor, code = line:match("^HTTP/(%d)%.(%d)%s+(%d%d%d)")
+    local code = line:match("^HTTP/%d%.%d%s+(%d%d%d)")
     if not code then return nil end
     local reason = line:match("^HTTP/%d%.%d%s+%d%d%d%s*(.-)$")
     return tonumber(code), reason
@@ -118,10 +127,10 @@ local function pool_put(key, sock)
     for _ in pairs(M._pool) do n = n + 1 end
     if n >= M.POOL_MAX then
         -- evict an arbitrary entry (pool size ~= distinct host count)
-        for k, e in pairs(M._pool) do
-            pcall(function() e.sock:close() end)
-            M._pool[k] = nil
-            break
+        local evict_key, evicted = next(M._pool)
+        if evict_key then
+            pcall(function() evicted.sock:close() end)
+            M._pool[evict_key] = nil
         end
     end
     M._pool[key] = { sock = sock, idle_since = os.time() }
@@ -136,6 +145,9 @@ local function pool_drop(key, sock)
 end
 
 -- Establish (or reuse) a TLS connection. Returns sock or nil.
+-- CONNECT_TIMEOUT_S bounds TCP + handshake so a DNS-poisoned host fails
+-- as fast as the legacy path would (the moegirl fast-fail contract).
+local CONNECT_TIMEOUT_S = 5
 local function connect(host, port, key)
     local sock = pool_get(key)
     if sock then
@@ -144,7 +156,7 @@ local function connect(host, port, key)
     end
     local tcp = socket.tcp()
     if not tcp then return nil end
-    tcp:settimeout(M.IDLE_TIMEOUT_S)
+    tcp:settimeout(CONNECT_TIMEOUT_S)
     if not select(1, tcp:connect(host, port)) then
         pcall(function() tcp:close() end)
         return nil
@@ -155,7 +167,7 @@ local function connect(host, port, key)
         return nil
     end
     tls:sni(host)
-    tls:settimeout(10)
+    tls:settimeout(CONNECT_TIMEOUT_S)
     if not select(1, tls:dohandshake()) then
         pcall(function() tcp:close() end)
         return nil
@@ -165,11 +177,14 @@ local function connect(host, port, key)
 end
 
 -- Accumulating reader with the 2 MB abort semantics of the legacy sink.
+-- NOTE: dot-call discipline — the closure takes ONLY the chunk; callers
+-- must use reader.add(chunk), never reader:add(chunk) (which would pass
+-- the reader table as the chunk and silently neuter the cap).
 local function make_reader(max_bytes)
     local received = 0
     local overflow = false
     return {
-        add = function(self_, chunk)
+        add = function(chunk)
             if overflow then return false end
             received = received + #chunk
             if received > max_bytes then
@@ -178,9 +193,9 @@ local function make_reader(max_bytes)
             end
             return true
         end,
-        overflowed = function() return overflow end,
     }
 end
+M.make_reader = make_reader -- exported pure-ish for the unit matrix
 
 -- Read the body per body_mode. Returns body string, keepalive_ok(boolean),
 -- error_kind(string|nil).
@@ -188,7 +203,7 @@ local function read_body(sock, mode, length, max_bytes)
     local reader = make_reader(max_bytes)
     local parts = {}
     local add = function(chunk)
-        if not reader:add(chunk) then return false end
+        if not reader.add(chunk) then return false end
         parts[#parts + 1] = chunk
         return true
     end
@@ -286,7 +301,12 @@ function M.request(url, timeout, max_bytes, user_agent)
     local port = tonumber(parts.port) or 443
     local key = parts.host .. ":" .. port
 
-    local ok, r1, r2, r3, r4 = pcall(function()
+    -- attempt() runs one full request round. A REUSED socket that died
+    -- during idle gets ONE silent retry on a fresh connection (stale-socket
+    -- absorption); a fresh-connection failure reports immediately — a dead
+    -- host must fail fast, not loop.
+    local function attempt(is_retry)
+        local reused = pool_get(key) ~= nil
         local sock = connect(parts.host, port, key)
         if not sock then return false, "error", "connect failed" end
         local code, can_keep, kind, headers, body =
@@ -294,6 +314,13 @@ function M.request(url, timeout, max_bytes, user_agent)
         if code == nil then
             -- broken in-flight: never re-queue a suspect socket
             pool_drop(key, sock)
+            if reused and not is_retry then
+                -- stale idle socket (server closed it during the quiet
+                -- window): absorb the failure, retry once on a fresh one
+                M._stats.reuses = M._stats.reuses - 1
+                M._stats.stale_retries = M._stats.stale_retries + 1
+                return attempt(true)
+            end
             return false, kind or "error", headers or "broken connection"
         end
         if can_keep then
@@ -306,6 +333,7 @@ function M.request(url, timeout, max_bytes, user_agent)
             if #body == 0 then
                 return false, "error", "Empty response body"
             end
+            M._stats.successes = M._stats.successes + 1
             return true, body, nil, headers
         elseif code == 429 then
             return false, "http_429", nil, headers
@@ -314,7 +342,9 @@ function M.request(url, timeout, max_bytes, user_agent)
         else
             return false, "http_4xx", nil, headers
         end
-    end)
+    end
+
+    local ok, r1, r2, r3, r4 = pcall(attempt, false)
     if not ok or r1 == nil then
         -- internal error or in-flight break: caller falls back to legacy
         return nil

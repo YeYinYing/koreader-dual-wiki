@@ -676,10 +676,10 @@ local HTTP_RETRIES = 1
 -- v1.3.3 (E7): TLS keepalive pool (keepalive.lua). Tried FIRST for https
 -- URLs; a pooled connection skips the 300-500 ms TCP+TLS handshake that
 -- ssl.https.request pays per call. Contract: nil => "not handled" (module
--- unavailable, disabled, or non-https) => legacy path; true => response
--- with the same shape the legacy path produces; false => transport-kind
--- failure with the same error kinds. Any pool-side anomaly returns nil, so
--- the legacy path below remains the single source of truth.
+-- unavailable, disabled, non-https, or internal anomaly) => legacy path;
+-- true => response; false => DEFINITIVE transport-kind failure, trusted
+-- and returned as-is (re-requesting over the legacy path would double-hit
+-- 429 rate limits and double latency on dead hosts).
 local keepalive = require("keepalive")
 keepalive.enabled = os.getenv("DUALWIKI_NO_KEEPALIVE") == nil
 
@@ -693,15 +693,17 @@ keepalive.enabled = os.getenv("DUALWIKI_NO_KEEPALIVE") == nil
 local function httpGetOnce(url, timeout)
     -- v1.3.3 (E7): pooled-TLS fast path. Unit tests set DUALWIKI_NO_KEEPALIVE
     -- (or keepalive.enabled=false) to pin the legacy transport.
-    local ka_ok, ka_body, ka_kind, ka_detail, ka_headers = keepalive.request(
+    local ka_ok, ka_body, ka_kind = keepalive.request(
         url, timeout or 6, MAX_RESPONSE_BYTES, USER_AGENT)
     if ka_ok == true then
         return true, ka_body
     end
     if ka_ok == false then
-        logger.warn("dual_wiki: keepalive path failed (", tostring(ka_kind), "), falling back:", url)
+        -- deterministic verdict from the pooled transport — do not re-hit
+        -- the legacy path or we would double-limit transient 429/5xx.
+        return false, ka_kind or "error", nil, nil
     end
-    -- ka_ok == nil or false: not handled / failed — legacy path.
+    -- ka_ok == nil: not handled or internal anomaly — legacy path.
     local transport = socket_url.parse(url).scheme == "https" and https or http
     socketutil:set_timeout(timeout or 6, 12)
     -- v1.2.2 fix: size-capped sink. ltn12.sink.table buffered the ENTIRE
@@ -1110,7 +1112,12 @@ function DualWiki:_registerHighlightButtons()
             if self._prewarm_scheduled then
                 UIManager:unschedule(self._prewarm_scheduled)
             end
-            self._prewarm_scheduled = UIManager:scheduleIn(0.6, function()
+            -- NOTE: UIManager:scheduleIn returns NOTHING (core contract), so
+            -- the task handle must be captured via a self-referencing closure
+            -- for the later unschedule. Storing scheduleIn's return would
+            -- store nil and let rapid re-highlights stack parallel prewarms.
+            local scheduled
+            scheduled = function()
                 self._prewarm_scheduled = nil
                 if not self.ui or not self.ui.dialog then return end
                 local cache_key = table.concat({ entry.engine, entry.lang or "", word }, "|")
@@ -1131,7 +1138,9 @@ function DualWiki:_registerHighlightButtons()
                 elseif ok and not self._last_error_kind then
                     self:_storeMissEntry(cache_key)
                 end
-            end)
+            end
+            self._prewarm_scheduled = scheduled
+            UIManager:scheduleIn(0.6, scheduled)
         end
         return {
             text = "",
@@ -1908,15 +1917,12 @@ function DualWiki:fetchWikidataFullAndShow(qid, word_boxes)
     local entity = ok_json and type(data) == "table" and type(data.entities) == "table"
         and data.entities[qid] or nil
     local sitelinks = entity and type(entity.sitelinks) == "table" and entity.sitelinks or nil
-    local try_langs = {}
+    -- Book language first, then zh, then en — deduped (an en book must not
+    -- probe the en sitelink twice).
     local book_lang = self:_bookLang()
-    if book_lang ~= "zh" then
-        try_langs[#try_langs + 1] = book_lang
-        try_langs[#try_langs + 1] = "zh"
-    else
-        try_langs[#try_langs + 1] = "zh"
-    end
-    try_langs[#try_langs + 1] = "en"
+    local try_langs = { book_lang }
+    if book_lang ~= "zh" then try_langs[#try_langs + 1] = "zh" end
+    if book_lang ~= "en" then try_langs[#try_langs + 1] = "en" end
     for _, lang in ipairs(try_langs) do
         local sl = sitelinks and sitelinks[lang .. "wiki"]
         if type(sl) == "table" and type(sl.title) == "string" and sl.title ~= "" then
@@ -2165,6 +2171,14 @@ function DualWiki:lookup(word, engine, word_boxes, lang, want_full)
             return
         end
         self._lookup_cache[cache_key] = nil -- stale miss: re-query
+    end
+
+    -- v1.3.3 (E8): a real lookup starting means the prewarm lost the race
+    -- (user tapped within the 600ms debounce) — cancel it, or both a real
+    -- ladder and the prefetch would burn the same queries concurrently.
+    if self._prewarm_scheduled then
+        UIManager:unschedule(self._prewarm_scheduled)
+        self._prewarm_scheduled = nil
     end
 
     local prompt_title = string.format("%s · %s", _("Querying"), cfg.label(lang))

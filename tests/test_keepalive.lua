@@ -74,6 +74,19 @@ check("K24 request exists", type(M.request), "function")
 check("K25 clear exists", type(M.clear), "function")
 check("K26 pure fns exported", type(M.parse_status_line), "function")
 
+print("== make_reader cap semantics (2MB abort) ==")
+do
+    local r = M.make_reader(10)
+    check("K27 under cap accepted", r.add("12345"), true)
+    check("K28 at cap accepted", r.add("12345"), true)
+    check("K29 over cap rejected", r.add("1"), false)
+    check("K30 stays rejected", r.add(""), false) -- overflow latches
+    local r2 = M.make_reader(4)
+    check("K31 single big chunk rejected", r2.add("12345"), false)
+    local r3 = M.make_reader(1024 * 1024)
+    check("K32 exactly-at-boundary ok", r3.add(string.rep("x", 1024 * 1024)), true)
+end
+
 if failures == 0 then
     print("ALL TESTS PASSED")
 else

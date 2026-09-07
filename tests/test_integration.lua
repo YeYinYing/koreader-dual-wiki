@@ -170,7 +170,7 @@ local httpGet = dw._httpGet
 do
     local stats_before = { opens = keepalive._stats.opens, reuses = keepalive._stats.reuses }
     local ok1, body1 = httpGet("https://en.wikipedia.org/w/api.php?action=query&meta=siteinfo&format=json", 10)
-    local ok2, body2 = httpGet("https://en.wikipedia.org/w/api.php?action=query&meta=siteinfo&format=json", 10)
+    local ok2 = httpGet("https://en.wikipedia.org/w/api.php?action=query&meta=siteinfo&format=json", 10)
     if ok1 and ok2 then
         pass("E7 two sequential https GETs via pool succeed")
     else
@@ -187,6 +187,13 @@ do
         pass("E7 pooled body is a valid siteinfo JSON")
     elseif ok1 then
         fail("E7 pooled body shape", "missing enwiki marker")
+    end
+    -- the responses must have traveled the POOL, not a silent legacy fallback
+    if keepalive._stats.successes >= 2 then
+        pass("E7 responses confirmed via pool fast path (successes="
+            .. keepalive._stats.successes .. ")")
+    else
+        fail("E7 pool fast-path proof", "successes=" .. tostring(keepalive._stats.successes))
     end
 end
 do
@@ -434,16 +441,29 @@ do
     if G_reader_settings:readSetting("dualwiki_lang") ~= nil then
         G_reader_settings:delSetting("dualwiki_lang")
     end
-    dw._lookup_cache = nil
-    dw.ui = { dialog = {}, highlight = nil }
-
-    dw:lookup("Mercury", "wikipedia", nil, "zh", false)
-    local w = shown[#shown]
+    -- Bounded retry: by the time this block runs the suite has warmed the
+    -- Wikimedia rate limiter, and a 429 on the dab wikitext parse degrades
+    -- the expansion by design (top stays the raw page). Same contract as
+    -- assertPipeline: a genuine regression fails all three attempts.
+    local w, label_ok, expanded
+    for attempt_b7 = 1, 3 do
+        dw._lookup_cache = nil
+        dw.ui = { dialog = {}, highlight = nil }
+        shown = {}
+        dw:lookup("Mercury", "wikipedia", nil, "zh", false)
+        w = shown[#shown]
+        label_ok = type(w) == "table" and type(w.results) == "table" and #w.results > 0
+            and w.results[1].dict == "Wikipedia (EN)"
+        expanded = label_ok and #w.results >= 2 and w.results[1].word ~= "Mercury"
+        if label_ok and expanded then break end
+        if attempt_b7 < 3 then
+            print("  .. B7 degraded (attempt " .. attempt_b7 .. "/3), backing off 10 s ..")
+            socket.sleep(10)
+        end
+    end
     if type(w) ~= "table" or type(w.results) ~= "table" or #w.results == 0 then
         fail("B7 script routing + dab expansion (Mercury via zh lookup)", "no results shown")
     else
-        local label_ok = w.results[1].dict == "Wikipedia (EN)"
-        local expanded = #w.results >= 2 and w.results[1].word ~= "Mercury"
         if label_ok and expanded then
             pass("B7 routes zh→en + dab expansion (dict=" .. w.results[1].dict
                 .. ", " .. #w.results .. " items, top: " .. tostring(w.results[1].word) .. ")")
