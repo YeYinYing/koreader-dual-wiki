@@ -1,5 +1,23 @@
 # Changelog
 
+## [1.3.4] - 2026-09-08 — release hardening & manual QA
+
+### Added
+
+- **Keepalive host whitelist**: the hand-rolled HTTP/1.1 reader now only speaks to the MediaWiki hosts the ENGINES table can produce (`*.wikipedia.org`, `*.wiktionary.org`, `*.wikidata.org`, `*.moegirl.org.cn`, `*.fandom.com`, `wiki.biligame.com`). Any other host returns nil from `request()` and falls back to the untouched legacy `ssl.https` path. Suffix impostors (`evil-wikipedia.org`, `wikipedia.org.evil.io`, bare `wikipedia.org`) are rejected; a 16-case matrix pins the contract in `tests/test_keepalive.lua` (K33–K48).
+- **Opt-in strict TLS verification**: setting `dualwiki_tls_strict = true` in `settings.reader.lua` switches the pooled transport to `verify="peer"` with a probed CA bundle (Debian/Kobo, RHEL, macOS, FreeBSD paths). Default remains `verify="none"` — e-ink devices boot with wrong clocks and stale CA bundles, and mandatory peer verification would break lookups for most users. When no CA bundle is locatable the mode degrades to lenient with a one-time logged warning. No menu entry: advanced, settings-file-only.
+- **Standard testing pipeline**: `tests/TESTING_SOP.md` documents the six-layer release gate (L1 static → L2/L2b unit → L3 smoke → L4 real-network integration → L5 coexistence → L6 manual on-device) with per-layer pass criteria, a change-type → minimum-layers matrix, and flaky-handling rules. `run_full_suite.sh` orchestrates L1–L5 in one command with per-layer logs under `/tmp/dw_test_logs/` and a timing summary.
+- **L6 headless supplement**: `tests/test_l6_headless.lua` covers the programmatically checkable manual-checklist items (A1–A11 core chain, B2–B5 settings logic) inside the emulator runtime. A9 asserts the session-cache contract through the real `lookup()`/`showResult()` path — a repeat lookup must complete with zero transport calls.
+
+### Fixed
+
+- **Subdomain hardening on every read path**: fandom and BWiki subdomain values are now capped at the 63-character DNS label limit on save AND on every read-back (`_defaultFandomSub`, `ENGINES.bwiki.defaultSub`), so hand-edited `settings.reader.lua` values cannot produce malformed URLs.
+
+### Infrastructure
+
+- **CI tag/version gate**: tag builds fail fast when the tag doesn't match `_meta.lua`'s `version`, blocking wrong-version release zips.
+- **Full manual QA round (L6)**: all A/B/C checklist items passed in the macOS emulator (real frontend, PW3 viewport) with screenshots under `docs/screenshots/v1.3.3-l6/`; see `tests/L6_HANDOFF_TO_ANTIGRAVITY.md` for the signed report. L1–L5 all green the same day (integration 33/33 under 26 rate-limit events).
+
 ## [1.3.3] - 2026-09-07 — search quality & reader ergonomics
 
 ### Added
