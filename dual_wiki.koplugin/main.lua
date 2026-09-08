@@ -635,7 +635,7 @@ local ENGINES = {
             if G_reader_settings then
                 local sub = G_reader_settings:readSetting("dualwiki_bwiki_sub")
                 if sub and sub ~= "" then
-                    sub = tostring(sub):lower():gsub("[^%a%d%-]", "")
+                    sub = tostring(sub):lower():gsub("[^%a%d%-]", ""):sub(1, 63)
                     if sub ~= "" then return sub end
                 end
             end
@@ -880,8 +880,9 @@ function DualWiki:_defaultFandomSub()
         if sub and sub ~= "" then
             -- v1.2.2: defensive normalization — fandom subdomains are
             -- lowercase alphanumeric + hyphen; strip anything else so a
-            -- stray setting value can't produce a malformed URL.
-            sub = tostring(sub):lower():gsub("[^%a%d%-]", "")
+            -- stray setting value can't produce a malformed URL. Capped at
+            -- the 63-char DNS label limit (v1.3.3 hardening).
+            sub = tostring(sub):lower():gsub("[^%a%d%-]", ""):sub(1, 63)
             if sub ~= "" then return sub end
         end
     end
@@ -1495,7 +1496,9 @@ function DualWiki:_promptForSubdomain(setting_key, default_value, touchmenu_inst
                     text = _("Save"),
                     is_enter_default = true,
                     callback = function()
-                        local value = tostring(dialog:getInputText() or ""):lower():gsub("[^%a%d%-]", "")
+                        -- DNS label limit is 63 chars; same charset rule as
+                        -- the read paths below (lowercase alnum + hyphen).
+                        local value = tostring(dialog:getInputText() or ""):lower():gsub("[^%a%d%-]", ""):sub(1, 63)
                         if value == "" then value = default_value end
                         G_reader_settings:saveSetting(setting_key, value)
                         -- v1.3.2: the lookup cache key is engine|lang|word — it

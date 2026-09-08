@@ -40,14 +40,83 @@ local ok_ssl, ssl = pcall(require, "ssl")
 local ok_url, socket_url = pcall(require, "socket.url")
 M.available = ok_socket and ok_ssl and ok_url
 
+-- ---------------------------------------------------------------- trust ----
+-- The hand-rolled HTTP/1.1 reader below is tuned and regression-tested
+-- against the MediaWiki hosts this plugin actually talks to (main.lua's
+-- ENGINES table). Anything else returns nil from request() and falls back
+-- to the legacy ssl.https path untouched — the custom protocol code never
+-- sees a host it was not built for.
+local TRUSTED_HOST_SUFFIXES = {
+    ".wikipedia.org",
+    ".wiktionary.org",
+    ".wikidata.org",
+    ".moegirl.org.cn",
+    ".fandom.com",
+}
+local TRUSTED_HOSTS = {
+    ["wiki.biligame.com"] = true,
+}
+function M.is_trusted_host(host)
+    if type(host) ~= "string" or host == "" then return false end
+    if TRUSTED_HOSTS[host] then return true end
+    for _, suffix in ipairs(TRUSTED_HOST_SUFFIXES) do
+        if host:sub(-#suffix) == suffix then return true end
+    end
+    return false
+end
+
 -- TLS parameters mirror KOReader's bundled ssl.https defaults (LuaSec 1.3.2
 -- cfg table) so pooled handshakes behave identically to the legacy path.
+--
+-- Strict certificate verification is a deliberate OPT-IN, never the default:
+-- e-ink devices often boot with a wrong clock (1970 reset) and carry stale or
+-- missing CA bundles, so verify="peer" would break lookups for most users.
+-- Advanced users can set dualwiki_tls_strict = true in settings.reader.lua;
+-- the switch only engages when a CA bundle is actually locatable, and
+-- degrades to the default lenient mode otherwise (logged once).
 local TLS_PARAMS = {
     protocol = "any",
     options = { "all", "no_sslv2", "no_sslv3", "no_tlsv1" },
     verify = "none",
     mode = "client",
 }
+local CA_CANDIDATES = {
+    "/etc/ssl/certs/ca-certificates.crt", -- Debian/Ubuntu/Kobo
+    "/etc/pki/tls/certs/ca-bundle.crt",   -- Fedora/RHEL style
+    "/etc/ssl/cert.pem",                  -- macOS
+    "/usr/local/share/certs/ca-root-nss.crt", -- FreeBSD
+}
+local strict_warned = false
+local function resolve_tls_params()
+    local params = {
+        protocol = TLS_PARAMS.protocol,
+        options = TLS_PARAMS.options,
+        verify = TLS_PARAMS.verify,
+        mode = TLS_PARAMS.mode,
+    }
+    if type(G_reader_settings) == "table"
+        and G_reader_settings.isTrue
+        and G_reader_settings:isTrue("dualwiki_tls_strict") then
+        local ok_lfs, lfs = pcall(require, "libs/libkoreader-lfs")
+        if ok_lfs then
+            for _, ca in ipairs(CA_CANDIDATES) do
+                if lfs.attributes(ca, "mode") == "file" then
+                    params.cafile = ca
+                    params.verify = "peer"
+                    return params
+                end
+            end
+        end
+        if not strict_warned then
+            strict_warned = true
+            local ok_logger, logger = pcall(require, "logger")
+            if ok_logger then
+                logger.warn("dual_wiki: dualwiki_tls_strict is set but no CA bundle found; using lenient TLS")
+            end
+        end
+    end
+    return params
+end
 
 if M.available then
     M._pool = {}   -- "host:port" -> { sock = <ssl socket>, idle_since = t }
@@ -161,7 +230,7 @@ local function connect(host, port, key)
         pcall(function() tcp:close() end)
         return nil
     end
-    local tls = ssl.wrap(tcp, TLS_PARAMS)
+    local tls = ssl.wrap(tcp, resolve_tls_params())
     if not tls then
         pcall(function() tcp:close() end)
         return nil
@@ -297,7 +366,7 @@ end
 function M.request(url, timeout, max_bytes, user_agent)
     if not M.enabled or not M.available then return nil end
     local parts = socket_url.parse(url)
-    if not parts or parts.scheme ~= "https" or not parts.host then
+    if not parts or parts.scheme ~= "https" or not parts.host or not M.is_trusted_host(parts.host) then
         return nil
     end
     local port = tonumber(parts.port) or 443

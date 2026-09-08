@@ -87,6 +87,30 @@ do
     check("K32 exactly-at-boundary ok", r3.add(string.rep("x", 1024 * 1024)), true)
 end
 
+print("== is_trusted_host whitelist (v1.3.3 hardening) ==")
+do
+    -- Every host the plugin's ENGINES table can produce must pass…
+    check("K33 en.wikipedia.org", M.is_trusted_host("en.wikipedia.org"), true)
+    check("K34 zh.wikipedia.org", M.is_trusted_host("zh.wikipedia.org"), true)
+    check("K35 en.wiktionary.org", M.is_trusted_host("en.wiktionary.org"), true)
+    check("K36 www.wikidata.org", M.is_trusted_host("www.wikidata.org"), true)
+    check("K37 zh.moegirl.org.cn", M.is_trusted_host("zh.moegirl.org.cn"), true)
+    check("K38 starwars.fandom.com", M.is_trusted_host("starwars.fandom.com"), true)
+    check("K39 wiki.biligame.com", M.is_trusted_host("wiki.biligame.com"), true)
+    -- …suffix impostors and foreign hosts must NOT (the custom HTTP reader
+    -- is only regression-tested against MediaWiki; anything else must fall
+    -- back to the legacy ssl.https transport).
+    check("K40 evil-wikipedia.org", M.is_trusted_host("evil-wikipedia.org"), false)
+    check("K41 wikipedia.org.evil.io", M.is_trusted_host("wikipedia.org.evil.io"), false)
+    check("K42 fandom.com.evil.io", M.is_trusted_host("fandom.com.evil.io"), false)
+    check("K43 moegirl.org.cn.evil.io", M.is_trusted_host("moegirl.org.cn.evil.io"), false)
+    check("K44 wikipedia.org (bare)", M.is_trusted_host("wikipedia.org"), false)
+    check("K45 wiki.biligame.com.evil.io", M.is_trusted_host("wiki.biligame.com.evil.io"), false)
+    check("K46 github.com", M.is_trusted_host("github.com"), false)
+    check("K47 nil", M.is_trusted_host(nil), false)
+    check("K48 empty", M.is_trusted_host(""), false)
+end
+
 if failures == 0 then
     print("ALL TESTS PASSED")
 else
