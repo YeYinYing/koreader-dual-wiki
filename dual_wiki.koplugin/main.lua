@@ -1217,7 +1217,7 @@ function DualWiki:showSearchDialog(engine, initial_query, word_boxes, lang)
         },
     }
     UIManager:show(input_dialog)
-    input_dialog:onShowKeyboard()
+    pcall(function() input_dialog:onShowKeyboard() end)
 end
 
 -- Merged probe request: one HTTP round-trip returns up to MAX_CANDIDATES
@@ -1729,7 +1729,7 @@ function DualWiki:showRetryDialog(failed_word, engine, word_boxes, lang)
         buttons = buttons,
     }
     UIManager:show(retry_dialog)
-    retry_dialog:onShowKeyboard()
+    pcall(function() retry_dialog:onShowKeyboard() end)
 end
 
 -- v1.3.3 (E7): test surface. httpGet is a file-local; the integration
