@@ -9,7 +9,7 @@ Full license notice in main.lua / LICENSE.
 local _ = require("gettext")
 return {
     fullname = _("Dual Wiki"),
-    description = _([[Multi-engine (Wikipedia zh/en/ja/de/fr/es/ru, Moegirlpedia,
-Fandom, Bilibili Game Wiki, Wiktionary) encyclopedia lookup for KOReader e-ink readers.]]),
-    version = "1.3.4",
+    description = _([[Dual-engine (Wikipedia zh/en/ja/de/fr/es/ru + Moegirlpedia)
+encyclopedia lookup for KOReader e-ink readers.]]),
+    version = "1.3.5",
 }

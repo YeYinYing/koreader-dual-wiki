@@ -2,83 +2,113 @@ msgid ""
 msgstr ""
 "Content-Type: text/plain; charset=UTF-8\nPlural-Forms: nplurals=1; plural=0;\n"
 
-msgid "Wikipedia (JA)"
-msgstr "ウィキペディア（日本語）"
-
-msgid "Wikipedia (EN)"
-msgstr "ウィキペディア（英語）"
-
-msgid "Wikipedia (ZH)"
-msgstr "ウィキペディア（中国語）"
-
-msgid "Moegirlpedia"
-msgstr "萌娘百科"
-
-msgid "Fandom (%s)"
-msgstr "Fandom（%s）"
-
-msgid "Fandom"
-msgstr "Fandom"
-
-msgid "Moegirlpedia lookup"
-msgstr "萌娘百科を検索"
-
-msgid "Wikipedia lookup (Chinese)"
-msgstr "ウィキペディアを検索（中国語）"
-
-msgid "Wikipedia lookup (English)"
-msgstr "ウィキペディアを検索（英語）"
-
-msgid "Wikipedia lookup (Japanese)"
-msgstr "ウィキペディアを検索（日本語）"
-
-msgid "Wikipedia lookup (%1)"
-msgstr "ウィキペディアを検索（%1）"
-
-msgid "Disambiguation entry"
-msgstr "曖昧さ回避の項目"
-
-msgid "Did you mean: %1?"
-msgstr "もしかして: %1"
-
-msgid "Try \"%1\""
-msgstr "「%1」を検索"
-
-msgid "Fandom lookup"
-msgstr "Fandom を検索"
-
 msgid "Article lookup"
 msgstr "項目を検索"
+
+msgid "Auto (detect from book)"
+msgstr "自動（書籍から検出）"
 
 msgid "Cancel"
 msgstr "キャンセル"
 
-msgid "Search"
-msgstr "検索"
+msgid "Candidate match."
+msgstr "（候補語。）"
 
-msgid "Candidate match. Tap the pencil icon at the top right to load the full article."
-msgstr "（候補語：右上の鉛筆アイコンをタップすると完全な本文を読み込みます。）"
+msgid "Chinese (ZH)"
+msgstr "中国語 (ZH)"
 
-msgid "Querying"
-msgstr "照会中"
+msgid "Clear session lookup cache"
+msgstr "セッション検索キャッシュをクリア"
+
+msgid "Cross-language article. Tap the pencil icon at the top right to load it."
+msgstr "他言語の記事です。右上のペンアイコンをタップすると読み込みます。"
+
+msgid "Cross-language suggestions"
+msgstr "他言語サジェスト（追加リクエストあり）"
+
+msgid "Did you mean: %1?"
+msgstr "もしかして: %1"
+
+msgid "Disambiguation entry"
+msgstr "曖昧さ回避の項目"
+
+msgid "Dual Wiki"
+msgstr "Dual Wiki"
+
+msgid "Dual Wiki settings"
+msgstr "Dual Wiki 設定"
+
+msgid "English (EN)"
+msgstr "英語 (EN)"
+
+msgid "French (FR)"
+msgstr "フランス語 (FR)"
+
+msgid "Full article"
+msgstr "全文を読む"
+
+msgid "German (DE)"
+msgstr "ドイツ語 (DE)"
+
+msgid "Japanese (JA)"
+msgstr "日本語 (JA)"
+
+msgid "Language lock (global default)"
+msgstr "言語ロック（グローバル既定）"
+
+msgid "Language lock (global default) *"
+msgstr ""
+
+msgid "Language lock (this book)"
+msgstr "言語ロック（この本）"
+
+msgid "Language lock (this book) *"
+msgstr ""
+
+msgid "Moegirlpedia"
+msgstr "萌娘百科"
+
+msgid "Moegirlpedia lookup"
+msgstr "萌娘百科を検索"
 
 msgid "Not found, modify and retry:"
 msgstr "見つかりません。修正して再検索："
 
-msgid "Retry"
-msgstr "再検索"
+msgid "Open results fullscreen by default"
+msgstr "結果をデフォルトで全画面表示"
 
-msgid "Switch to"
-msgstr "切り替え"
+msgid "Prewarm lookup on highlight"
+msgstr "ハイライト先行取得（連続検索が高速化）"
+
+msgid "Querying"
+msgstr "照会中"
 
 msgid "Rate limited by the wiki server. Wait a minute and retry."
 msgstr "サーバーにレート制限されました。1分待ってから再試行してください。"
 
-msgid "The wiki server rejected the request."
-msgstr "サーバーにリクエストを拒否されました。"
+msgid "Retry"
+msgstr "再検索"
 
-msgid "The wiki server is having trouble. Retry later."
-msgstr "サーバーに問題が発生しています。後ほど再試行してください。"
+msgid "Russian (RU)"
+msgstr "ロシア語 (RU)"
+
+msgid "Search"
+msgstr "検索"
+
+msgid "Session lookup cache cleared."
+msgstr "検索キャッシュをクリアしました。"
+
+msgid "Spanish (ES)"
+msgstr "スペイン語 (ES)"
+
+msgid "Switch to"
+msgstr "切り替え"
+
+msgid "Take over native Wikipedia entry points"
+msgstr "標準の Wikipedia ボタンとメニューを引き継ぐ"
+
+msgid "The article is too large to display on this device."
+msgstr "この項目は長すぎるため、この端末では表示できません。"
 
 msgid "The request timed out."
 msgstr "リクエストがタイムアウトしました。"
@@ -86,99 +116,35 @@ msgstr "リクエストがタイムアウトしました。"
 msgid "The site may be unreachable or blocked on this network."
 msgstr "このサイトに接続できないか、現在のネットワークでブロックされている可能性があります。"
 
-msgid "The article is too large to display on this device."
-msgstr "この項目は長すぎるため、この端末では表示できません。"
+msgid "The wiki server is having trouble. Retry later."
+msgstr "サーバーに問題が発生しています。後ほど再試行してください。"
+
+msgid "The wiki server rejected the request."
+msgstr "サーバーにリクエストを拒否されました。"
+
+msgid "Try \"%1\""
+msgstr "「%1」を検索"
+
+msgid "Wikipedia"
+msgstr "ウィキペディア"
 
 msgid "Wikipedia (%s)"
 msgstr "Wikipedia (%s)"
 
-msgid "Bilibili Game Wiki (%s)"
-msgstr "ビリビリゲームWiki (%s)"
+msgid "Wikipedia (EN)"
+msgstr "ウィキペディア（英語）"
 
-msgid "Bilibili Game Wiki"
-msgstr "ビリビリゲームWiki"
+msgid "Wikipedia (JA)"
+msgstr "ウィキペディア（日本語）"
 
-msgid "Wiktionary (JA)"
-msgstr "ウィクショナリー (JA)"
+msgid "Wikipedia (ZH)"
+msgstr "ウィキペディア（中国語）"
 
-msgid "Wiktionary (EN)"
-msgstr "ウィクショナリー (EN)"
+msgid "Wikipedia lookup (%1)"
+msgstr "ウィキペディアを検索（%1）"
 
-msgid "Wiktionary"
-msgstr "ウィクショナリー"
+msgid "Wikipedia lookup (English)"
+msgstr "ウィキペディアを検索（英語）"
 
-msgid "Wiktionary lookup"
-msgstr "ウィクショナリー検索"
-
-msgid "Bilibili Game Wiki lookup"
-msgstr "ビリビリゲームWiki検索"
-
-msgid "Dual Wiki settings"
-msgstr "Dual Wiki 設定"
-
-msgid "Language lock (this book)"
-msgstr "言語ロック（この本）"
-
-msgid "Language lock (global default)"
-msgstr "言語ロック（グローバル既定）"
-
-msgid "Auto (detect from book)"
-msgstr "自動（書籍から検出）"
-
-msgid "Chinese (ZH)"
-msgstr "中国語 (ZH)"
-
-msgid "English (EN)"
-msgstr "英語 (EN)"
-
-msgid "Japanese (JA)"
-msgstr "日本語 (JA)"
-
-msgid "German (DE)"
-msgstr "ドイツ語 (DE)"
-
-msgid "French (FR)"
-msgstr "フランス語 (FR)"
-
-msgid "Spanish (ES)"
-msgstr "スペイン語 (ES)"
-
-msgid "Russian (RU)"
-msgstr "ロシア語 (RU)"
-
-msgid "Fandom community: %1"
-msgstr "Fandom コミュニティ：%1"
-
-msgid "Bilibili game wiki: %1"
-msgstr "ビリビリゲームWiki：%1"
-
-msgid "Clear session lookup cache"
-msgstr "セッション検索キャッシュをクリア"
-
-msgid "Session lookup cache cleared."
-msgstr "検索キャッシュをクリアしました。"
-
-msgid "Preferred engine (this book)"
-msgstr "優先エンジン（この本）"
-
-msgid "Preferred engine (global default)"
-msgstr "優先エンジン（グローバル）"
-
-msgid "Auto (book language plan)"
-msgstr "自動（本の言語に従う）"
-
-msgid "Prewarm lookup on highlight"
-msgstr "ハイライト時に検索を先行取得"
-
-msgid "Cross-language article. Tap the pencil icon at the top right to load it."
-msgstr "他言語の記事です。右上のペンアイコンをタップすると読み込みます。"
-
-msgid "Enter wiki subdomain"
-msgstr "Wiki サブドメインを入力"
-
-msgid "e.g. %1"
-msgstr "例：%1"
-
-msgid "Save"
-msgstr "保存"
-
+msgid "Wikipedia lookup (Japanese)"
+msgstr "ウィキペディアを検索（日本語）"

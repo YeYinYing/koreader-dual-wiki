@@ -1,85 +1,115 @@
-# Dual Wiki plugin translation template.
+# Dual Wiki plugin translation template (slim build).
 msgid ""
 msgstr ""
 "Content-Type: text/plain; charset=UTF-8\n"
 "Plural-Forms: nplurals=1; plural=0;\n"
 
-msgid "Wikipedia (JA)"
-msgstr ""
-
-msgid "Wikipedia (EN)"
-msgstr ""
-
-msgid "Wikipedia (ZH)"
-msgstr ""
-
-msgid "Moegirlpedia"
-msgstr ""
-
-msgid "Fandom (%s)"
-msgstr ""
-
-msgid "Fandom"
-msgstr ""
-
-msgid "Moegirlpedia lookup"
-msgstr ""
-
-msgid "Wikipedia lookup (%1)"
-msgstr ""
-
-msgid "Disambiguation entry"
-msgstr ""
-
-msgid "Did you mean: %1?"
-msgstr ""
-
-msgid "Try \"%1\""
-msgstr ""
-
-msgid "Wikipedia lookup (Chinese)"
-msgstr ""
-
-msgid "Wikipedia lookup (English)"
-msgstr ""
-
-msgid "Wikipedia lookup (Japanese)"
-msgstr ""
-
-msgid "Fandom lookup"
-msgstr ""
-
 msgid "Article lookup"
+msgstr ""
+
+msgid "Auto (detect from book)"
 msgstr ""
 
 msgid "Cancel"
 msgstr ""
 
-msgid "Search"
+msgid "Candidate match."
 msgstr ""
 
-msgid "Candidate match. Tap the pencil icon at the top right to load the full article."
+msgid "Chinese (ZH)"
 msgstr ""
 
-msgid "Querying"
+msgid "Clear session lookup cache"
+msgstr ""
+
+msgid "Cross-language article. Tap the pencil icon at the top right to load it."
+msgstr ""
+
+msgid "Cross-language suggestions"
+msgstr ""
+
+msgid "Did you mean: %1?"
+msgstr ""
+
+msgid "Disambiguation entry"
+msgstr ""
+
+msgid "Dual Wiki"
+msgstr ""
+
+msgid "Dual Wiki settings"
+msgstr ""
+
+msgid "English (EN)"
+msgstr ""
+
+msgid "French (FR)"
+msgstr ""
+
+msgid "Full article"
+msgstr ""
+
+msgid "German (DE)"
+msgstr ""
+
+msgid "Japanese (JA)"
+msgstr ""
+
+msgid "Language lock (global default)"
+msgstr ""
+
+msgid "Language lock (global default) *"
+msgstr ""
+
+msgid "Language lock (this book)"
+msgstr ""
+
+msgid "Language lock (this book) *"
+msgstr ""
+
+msgid "Moegirlpedia"
+msgstr ""
+
+msgid "Moegirlpedia lookup"
 msgstr ""
 
 msgid "Not found, modify and retry:"
 msgstr ""
 
-msgid "Retry"
+msgid "Open results fullscreen by default"
 msgstr ""
 
-msgid "Switch to"
+msgid "Prewarm lookup on highlight"
+msgstr ""
+
+msgid "Querying"
 msgstr ""
 
 msgid "Rate limited by the wiki server. Wait a minute and retry."
 msgstr ""
 
-msgid "The wiki server rejected the request."
+msgid "Retry"
 msgstr ""
 
-msgid "The wiki server is having trouble. Retry later."
+msgid "Russian (RU)"
+msgstr ""
+
+msgid "Search"
+msgstr ""
+
+msgid "Session lookup cache cleared."
+msgstr ""
+
+msgid "Spanish (ES)"
+msgstr ""
+
+msgid "Switch to"
+msgstr ""
+
+msgid "Take over native Wikipedia entry points"
+msgstr ""
+
+msgid "The article is too large to display on this device."
 msgstr ""
 
 msgid "The request timed out."
@@ -88,99 +118,36 @@ msgstr ""
 msgid "The site may be unreachable or blocked on this network."
 msgstr ""
 
-msgid "The article is too large to display on this device."
+msgid "The wiki server is having trouble. Retry later."
+msgstr ""
+
+msgid "The wiki server rejected the request."
+msgstr ""
+
+msgid "Try \"%1\""
+msgstr ""
+
+msgid "Wikipedia"
 msgstr ""
 
 msgid "Wikipedia (%s)"
 msgstr ""
 
-msgid "Bilibili Game Wiki (%s)"
+msgid "Wikipedia (EN)"
 msgstr ""
 
-msgid "Bilibili Game Wiki"
+msgid "Wikipedia (JA)"
 msgstr ""
 
-msgid "Wiktionary (JA)"
+msgid "Wikipedia (ZH)"
 msgstr ""
 
-msgid "Wiktionary (EN)"
+msgid "Wikipedia lookup (%1)"
 msgstr ""
 
-msgid "Wiktionary"
+msgid "Wikipedia lookup (English)"
 msgstr ""
 
-msgid "Wiktionary lookup"
-msgstr ""
-
-msgid "Bilibili Game Wiki lookup"
-msgstr ""
-
-msgid "Dual Wiki settings"
-msgstr ""
-
-msgid "Language lock (this book)"
-msgstr ""
-
-msgid "Language lock (global default)"
-msgstr ""
-
-msgid "Auto (detect from book)"
-msgstr ""
-
-msgid "Chinese (ZH)"
-msgstr ""
-
-msgid "English (EN)"
-msgstr ""
-
-msgid "Japanese (JA)"
-msgstr ""
-
-msgid "German (DE)"
-msgstr ""
-
-msgid "French (FR)"
-msgstr ""
-
-msgid "Spanish (ES)"
-msgstr ""
-
-msgid "Russian (RU)"
-msgstr ""
-
-msgid "Fandom community: %1"
-msgstr ""
-
-msgid "Bilibili game wiki: %1"
-msgstr ""
-
-msgid "Clear session lookup cache"
-msgstr ""
-
-msgid "Session lookup cache cleared."
-msgstr ""
-
-msgid "Preferred engine (this book)"
-msgstr ""
-
-msgid "Preferred engine (global default)"
-msgstr ""
-
-msgid "Auto (book language plan)"
-msgstr ""
-
-msgid "Prewarm lookup on highlight"
-msgstr ""
-
-msgid "Cross-language article. Tap the pencil icon at the top right to load it."
-msgstr ""
-
-msgid "Enter wiki subdomain"
-msgstr ""
-
-msgid "e.g. %1"
-msgstr ""
-
-msgid "Save"
+msgid "Wikipedia lookup (Japanese)"
 msgstr ""
 

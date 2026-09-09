@@ -1,5 +1,5 @@
 --[[--
-Dual-Engine Encyclopedia (Moegirlpedia + Wikipedia + Fandom + more) Plugin for KOReader.
+Dual-Engine Encyclopedia (Moegirlpedia + Wikipedia) Plugin for KOReader.
 
 Copyright (C) 2026 YeYinYing
 
@@ -16,27 +16,20 @@ GNU Affero General Public License for more details.
 You should have received a copy of the GNU Affero General Public License
 along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-v1.3.0 — Phase 2.2 European Languages, Settings & Infrastructure:
+Slim build (v1.3.5) — user-directed scope reduction:
 
-1. Phase 2.2 languages: German / French / Spanish / Russian Wikipedia via
-   dynamic button slots — the five hard-coded highlight buttons collapse
-   into two slots whose factory re-resolves the book language on every
-   highlight-menu invocation (button text, visibility and target engine
-   all live). de/fr/es/ru books get [Wikipedia (XX)] [Wikipedia (EN)].
-2. Settings hub (menu → Dual Wiki settings): language lock per book
-   (doc_settings) and globally, Fandom community / BWiki game subdomain
-   prompts, session-cache clear. This fulfils the HANDOVER section 5
-   language-lock UI commitment.
-3. Engine matrix growth: Bilibili Game Wiki (wiki.biligame.com, MediaWiki,
-   parse adapter) and Wiktionary (en/ja) join via the fullTextViaParse flag.
-4. parse-engine two-phase fetch: section=0 intro first (tens of KB);
-   auto-upgrade to the full page only when the intro is < 300 bytes —
-   low-RAM devices no longer decode 1.5 MB Fandom pages routinely.
+1. Two engines only: Moegirlpedia + Wikipedia. Fandom / BWiki / Wiktionary
+   and the action=parse full-text adapter are removed.
+2. de/fr/es/ru are recognized (LANG_MAP) but only surface when the book
+   itself is that language — hidden otherwise (button plan, lang lock).
+3. Settings hub: language lock per book (doc_settings) and globally,
+   prewarm opt-in, cross-language bridge opt-in, session-cache clear.
+4. Opt-in features (default OFF): highlight prewarm (dualwiki_prewarm),
+   cross-language suggestions (dualwiki_langlink).
 5. Session lookup cache: identical word/engine/lang repeats skip the
    network (LRU-capped at 32), cleared on document close or on demand.
-6. sharesPrefix Latin branch generalized to %S+ so Cyrillic (ru) titles
-   pass the prefix-relation guard.
-7. normalizeLang extended: ger/deu→de, fre/fra→fr, spa→es, rus→ru.
+6. Wikidata bridge (wbgetentities) and sitelink notability re-rank are
+   removed — fewer cross-host round trips.
 
 Inherits from v1.2.x — cross-device hardening (https dispatch, explicit
 zh body-text variant, device-agnostic UA, differentiated transport error
@@ -46,9 +39,6 @@ language-aware particles, context-aware detection, gettext i18n).
 Enables seamless online search and definition lookup across:
 1. ACG / Anime terms from Moegirlpedia (zh.moegirl.org.cn)
 2. General knowledge from Wikipedia (zh/ja/en/de/fr/es/ru.wikipedia.org)
-3. Pop-culture from Fandom communities (starwars, genshin-impact, ...)
-4. Game lore from Bilibili game wikis (wiki.biligame.com)
-5. Word definitions from Wiktionary (en/ja.wiktionary.org)
 --]]--
 
 local DictQuickLookup = require("ui/widget/dictquicklookup")
@@ -87,7 +77,7 @@ local MAX_RESPONSE_BYTES = 2 * 1024 * 1024
 -- v1.2.1 (M1-A3): device-agnostic User-Agent. The old hard-coded
 -- "KOReader/2024.04 (Kindle)" misrepresented every device as a Kindle and
 -- skewed per-platform statistics. Bump alongside _meta.lua on release.
-local PLUGIN_VERSION = "1.3.3"
+local PLUGIN_VERSION = "1.3.5"
 local USER_AGENT = "dual_wiki.koplugin/" .. PLUGIN_VERSION .. " (KOReader)"
 
 -- Retrieval pipeline tuning
@@ -272,17 +262,6 @@ local PARTICLES = {
     ja = { "の", "に", "を", "は", "が", "で", "と", "へ", "も", "な", "よ", "ね" },
     en = { "'s", "’s" },
 }
--- v1.3.3 (B5): European trailing stopwords, one space-delimited token per
--- entry (leading space is part of the pattern). Deliberately conservative —
--- function words only, no pronouns/verbs, so "de Gaulle" or "die Hose"
--- never lose their head noun. Declared BEFORE stripTrailingParticle (Lua
--- forward-reference: a later local would not be captured as its upvalue).
-local PHRASE_PARTICLES = {
-    fr = { " de", " du", " des", " la", " le", " les", " et", " est" },
-    es = { " de", " del", " la", " el", " y", " en" },
-    it = { " di", " del", " della", " e", " in" },
-    de = { " der", " die", " das", " und", " des", " dem", " den" },
-}
 
 local function stripTrailingParticle(q, lang)
     local list = PARTICLES[lang] or PARTICLES.zh
@@ -295,101 +274,20 @@ local function stripTrailingParticle(q, lang)
             end
         end
     end
-    -- v1.3.3 (B5): word-level trailing stopwords for the European tier —
-    -- space-delimited tokens ("L'histoire de" → "L'histoire"), matched
-    -- case-insensitively via caseFold and only when the remainder keeps ≥2
-    -- characters. Char-level PARTICLES above still win first; whole-word
-    -- tokens like "Rome" or "Gaulle" never match (leading space required).
-    local phrases = PHRASE_PARTICLES[lang]
-    if phrases then
-        local fq = caseFold(q)
-        for _, p in ipairs(phrases) do
-            if fq:sub(-#p) == p then
-                local stripped = q:sub(1, #q - #p)
-                if utf8Len(stripped) >= 2 then
-                    return stripped
-                end
-            end
-        end
-    end
     return q
 end
 
--- v1.3.2: French/Romance elision (l'amour → amour, qu'il → il). An elided
--- article at the head of the selection breaks prefixsearch (the article
--- lives under the bare word). This is strictly a FALLBACK strip: the exact
--- query always runs first, so titles that legitimately begin with an
--- article ("Les Misérables") are safe — their case-insensitive exact form
--- hits in Stage 1 and this strip never executes. Longest-match wins so
--- "jusqu'à" is never mangled into "jus" by the "qu'" entry; a remainder
--- shorter than 2 characters aborts the strip. Each stem is tried with both
--- the ASCII apostrophe and the typographic one (U+2019).
--- v1.3.3 (E3): Italian articulated-preposition stems (dell'/sull'/nell'/…)
--- join the shared list — longest-match keeps them ahead of plain "d".
-local ELISION_STEMS = { "jusqu", "qu", "dell", "dall", "sull", "nell", "coll", "pell", "l", "d", "n", "s", "j", "c", "m", "t", "un" }
-local ELISION_LANGS = { fr = true, it = true, pt = true }
-local ELISION_APOSTROPHES = { "'", "\226\128\153" }
+-- Word-boundary good-hit rule: en always, de/fr/es/ru only when the
+-- book is that language (平时隐藏，命中才生效).
+local LATIN_LANGS = { en = true, de = true, fr = true, es = true, ru = true }
 
--- v1.3.3 (E3): German fusional prepositions ("zum Beispiel" → "Beispiel").
--- Word-level leading contractions, space-delimited (unlike the Romance
--- apostrophe forms), longest first. "Im Wald" → "Wald" only ever runs as a
--- FALLBACK: titles genuinely starting with the contraction hit exactly in
--- Stage 1 and this strip never executes. Word-final space in the pattern
--- prevents "Immer" from matching "im".
-local DE_FUSIONS = {
-    "von dem ", "zu dem ", "bei dem ", "in dem ", "von der ", "zu der ", "bei der ", "in der ",
-    "beim ", "ans ", "ins ", "zum ", "zur ", "vom ", "im ", "am ",
-}
-
-local function stripLeadingElision(q, lang)
-    if not ELISION_LANGS[lang] then return q end
-    if utf8Len(q) < 4 then return q end
-    -- Match case-insensitively: sentence-initial selections arrive as
-    -- "L'Étranger", "Qu'il" etc. Stems are pure ASCII, so lowercasing the
-    -- first few bytes never shifts byte boundaries — the match length can
-    -- be applied to the original string directly.
-    local probe = q:sub(1, 10):lower()
-    local best
-    for _, stem in ipairs(ELISION_STEMS) do
-        for _, apos in ipairs(ELISION_APOSTROPHES) do
-            local head = stem .. apos
-            if probe:sub(1, #head) == head and (not best or #head > #best) then
-                best = head
-            end
-        end
-    end
-    if not best then return q end
-    local stripped = q:sub(#best + 1)
-    if utf8Len(stripped) < 2 then return q end
-    return stripped
-end
-
--- v1.3.3 (E3): German word-level leading contraction strip. Requires the
--- remainder to keep ≥2 characters and the whole query ≥5 ("zum X").
-local function stripLeadingFusion(q, lang)
-    if lang ~= "de" then return q end
-    if utf8Len(q) < 5 then return q end
-    local probe = q:sub(1, 12):lower()
-    for _, head in ipairs(DE_FUSIONS) do
-        if probe:sub(1, #head) == head then
-            local stripped = q:sub(#head + 1)
-            if utf8Len(stripped) >= 2 then
-                return stripped
-            end
-        end
-    end
-    return q
-end
-
--- Latin script languages get the word-boundary good-hit rule (协同改进项 2).
-local LATIN_LANGS = { en = true, de = true, fr = true, es = true, ru = true, it = true, pt = true }
-
--- v1.3.3 (B7): sniff the dominant script of a selection for engine routing.
--- Only three UNAMBIGUOUS cases route: pure-Latin, pure-Cyrillic, pure-kana.
--- Anything mixed (灼眼のシャナ = CJK+kana), Greek/Hangul, or digit-only
--- stays put — the pipeline's own Stage 3/6 fallbacks keep handling those.
--- Codepoint walks are byte-safe via utf8Decode; letters only, so digits and
--- punctuation never tip the verdict.
+-- v1.3.3 (B7): sniff the dominant script of a selection for wikipedia
+-- language routing (zh book + foreign-script selection → direct probe).
+-- Only three UNAMBIGUOUS cases route: pure-Latin→en, pure-Cyrillic→ru,
+-- pure-kana→ja. Anything mixed (灼眼のシャナ = CJK+kana), Greek/Hangul,
+-- or digit-only stays put — the pipeline's own Stage 3/6 fallbacks keep
+-- handling those. Codepoint walks are byte-safe via utf8Decode; letters
+-- only, so digits and punctuation never tip the verdict.
 local function routeLangForScript(q)
     if not q or utf8Len(q) < 2 then return nil end
     local latin, cyrillic, kana, other = 0, 0, 0, 0
@@ -520,10 +418,6 @@ local function parseCandidatePages(data, query)
                 -- prop=pageprops&ppprop=disambiguation. Absent (nil) on
                 -- non-dab pages and on engines that skip the prop block.
                 dab = (type(pageprops) == "table" and pageprops.disambiguation ~= nil) and true or nil,
-                -- v1.3.3 (E1): Wikidata QID rides the same pageprops block;
-                -- feeds the sitelink-count notability re-rank.
-                qid = type(pageprops) == "table" and type(pageprops.wikibase_item) == "string"
-                    and pageprops.wikibase_item or nil,
             }
         end
     end
@@ -536,9 +430,9 @@ local function parseCandidatePages(data, query)
     return #cands > 0 and cands or nil
 end
 
--- Normalize a doc-props language field ("zh-CN", "en_US", "eng", "ja"…) to a
--- plugin language key. v1.3.0 (Phase 2.2) extends the map to the European
--- tier-two languages; anything unknown still defaults to zh.
+-- Normalize a doc-props language field ("zh-CN", "en_US", "eng", "ja"…)
+-- to a plugin language key. de/fr/es/ru are recognized but only surface
+-- when the book itself is that language (button plan / lang-lock routing).
 local LANG_MAP = {
     zh = "zh", zho = "zh", chi = "zh", cn = "zh",
     en = "en", eng = "en",
@@ -582,9 +476,6 @@ local ENGINES = {
             local l = lang or "zh"
             if l == "ja" then return _("Wikipedia (JA)") end
             if l == "en" then return _("Wikipedia (EN)") end
-            -- v1.3.2: the old three-language era returned (ZH) for EVERY
-            -- non-ja/en language — result windows for fr/de/es/ru lookups
-            -- were mislabeled (user-acceptance finding).
             return string.format(_("Wikipedia (%s)"), l:upper())
         end,
         needsConverttitles = function(lang) return (lang or "zh") == "zh" end,
@@ -599,64 +490,8 @@ local ENGINES = {
             return _("Moegirlpedia")
         end,
         needsConverttitles = function() return false end,
-        -- zh.moegirl serves Japanese terms too (シャナ etc.); particles follow
-        -- the query/book language rather than the site language.
         particleLang = function(lang) return lang or "zh" end,
         switchTarget = function() return "wikipedia" end,
-    },
-    fandom = {
-        api = function(sub)
-            return string.format("https://%s.fandom.com/api.php", sub or "starwars")
-        end,
-        label = function(sub)
-            return string.format(_("Fandom (%s)"), sub or "starwars")
-        end,
-        needsConverttitles = function() return false end,
-        particleLang = function() return "en" end,
-        switchTarget = function() return "wikipedia" end,
-        -- v1.3.0: parse-engine flag — Fandom ships no TextExtracts, so
-        -- candidates are title-only and full articles go through action=parse.
-        fullTextViaParse = true,
-    },
-    -- v1.3.0 (Phase 2.2+): Bilibili game wikis (Genshin Impact, Minecraft…).
-    -- Same MediaWiki core as Fandom, same missing TextExtracts adapter.
-    bwiki = {
-        api = function(sub)
-            return string.format("https://wiki.biligame.com/%s/api.php", sub or "ys")
-        end,
-        label = function(sub)
-            return string.format(_("Bilibili Game Wiki (%s)"), sub or "ys")
-        end,
-        needsConverttitles = function() return false end,
-        particleLang = function() return "zh" end,
-        switchTarget = function() return "wikipedia" end,
-        fullTextViaParse = true,
-        defaultSub = function()
-            if G_reader_settings then
-                local sub = G_reader_settings:readSetting("dualwiki_bwiki_sub")
-                if sub and sub ~= "" then
-                    sub = tostring(sub):lower():gsub("[^%a%d%-]", ""):sub(1, 63)
-                    if sub ~= "" then return sub end
-                end
-            end
-            return "ys"
-        end,
-    },
-    -- v1.3.0: Wiktionary for foreign-language reading (word definitions,
-    -- etymology, pronunciation). MediaWiki-native; no TextExtracts either.
-    wiktionary = {
-        api = function(lang)
-            return string.format("https://%s.wiktionary.org/w/api.php", lang or "en")
-        end,
-        label = function(lang)
-            local l = lang or "en"
-            if l == "ja" then return _("Wiktionary (JA)") end
-            return _("Wiktionary (EN)")
-        end,
-        needsConverttitles = function() return false end,
-        particleLang = function(lang) return "en" end,
-        switchTarget = function() return "wikipedia" end,
-        fullTextViaParse = true,
     },
 }
 
@@ -708,9 +543,9 @@ local function httpGetOnce(url, timeout)
     local transport = socket_url.parse(url).scheme == "https" and https or http
     socketutil:set_timeout(timeout or 6, 12)
     -- v1.2.2 fix: size-capped sink. ltn12.sink.table buffered the ENTIRE
-    -- body (potentially multi-MB on Fandom parse) and only rejected it
-    -- afterwards, so the "2 MB cap" never actually protected low-RAM
-    -- devices. This sink aborts the transfer the moment the cap is crossed.
+    -- body and only rejected it afterwards, so the "2 MB cap" never
+    -- actually protected low-RAM devices. This sink aborts the transfer
+    -- the moment the cap is crossed.
     local sink = {}
     local received, overflow = 0, false
     local capped_sink = function(chunk)
@@ -807,7 +642,7 @@ local function cleanWikiExtract(text)
     -- Format sub-sections as ▸ sub-heading, and main sections as 【main heading】
     text = text:gsub("===+ *(.-) *===+", LF .. LF .. "▸ %1" .. LF)
     text = text:gsub("== *(.-) *==", LF .. LF .. "【%1】" .. LF)
-    -- Strip any residual HTML tags if any leaked through (Fandom action=parse)
+    -- Strip any residual HTML tags if any leaked through
     text = text:gsub("<[^>]+>", "")
     -- Normalize multiple newlines
     text = text:gsub(LF .. LF .. LF .. "+", LF .. LF)
@@ -874,43 +709,12 @@ function DualWiki:_rawBookLanguage()
     return ""
 end
 
-function DualWiki:_defaultFandomSub()
-    if G_reader_settings then
-        local sub = G_reader_settings:readSetting("dualwiki_fandom_community")
-        if sub and sub ~= "" then
-            -- v1.2.2: defensive normalization — fandom subdomains are
-            -- lowercase alphanumeric + hyphen; strip anything else so a
-            -- stray setting value can't produce a malformed URL. Capped at
-            -- the 63-char DNS label limit (v1.3.3 hardening).
-            sub = tostring(sub):lower():gsub("[^%a%d%-]", ""):sub(1, 63)
-            if sub ~= "" then return sub end
-        end
-    end
-    return "starwars"
-end
-
--- v1.3.0: resolve the engine lookup subdomain (Fandom community / BWiki game)
--- from the lang parameter slot, which carries the subdomain for those engines.
-function DualWiki:_engineSub(engine, lang)
-    if engine == "fandom" then
-        return (lang and lang ~= "") and lang or self:_defaultFandomSub()
-    elseif engine == "bwiki" then
-        return (lang and lang ~= "") and lang or ENGINES.bwiki.defaultSub()
-    end
-    return lang
-end
-
--- v1.3.0 (Phase 2.2): book-language → highlight-button plan. Two dynamic
--- slots replace the five hard-coded buttons; each slot's factory re-reads
--- the book language on every highlight-menu invocation, so buttons follow
--- the book (and the language lock) without re-registration.
---   zh book: [Moegirlpedia] [Wikipedia (ZH)]
---   en book: [Wikipedia (EN)] [Fandom]
---   ja book: [Wikipedia (JA)] [Moegirlpedia]
---   de/fr/es/ru book: [Wikipedia (XX)] [Wikipedia (EN)]   (cross-language assist)
+-- Book-language → highlight-button plan. de/fr/es/ru only materialize
+-- when the book itself is that language (LANG_MAP recognizes them, but
+-- they stay hidden otherwise — per user direction "平时隐藏").
 local BOOK_BUTTON_PLANS = {
     zh = { { engine = "moegirl", lang = "zh" }, { engine = "wikipedia", lang = "zh" } },
-    en = { { engine = "wikipedia", lang = "en" }, { engine = "fandom", lang = "fandom-sub" } },
+    en = { { engine = "wikipedia", lang = "en" }, { engine = "wikipedia", lang = "zh" } },
     ja = { { engine = "wikipedia", lang = "ja" }, { engine = "moegirl", lang = "ja" } },
     de = { { engine = "wikipedia", lang = "de" }, { engine = "wikipedia", lang = "en" } },
     fr = { { engine = "wikipedia", lang = "fr" }, { engine = "wikipedia", lang = "en" } },
@@ -918,9 +722,6 @@ local BOOK_BUTTON_PLANS = {
     ru = { { engine = "wikipedia", lang = "ru" }, { engine = "wikipedia", lang = "en" } },
 }
 
--- Button labels: the three core languages keep their translated msgids;
--- Phase 2.2 languages use the "Wikipedia (%s)" format msgid (proper names
--- are conventionally not translated further).
 local function buttonLabel(entry)
     if entry.engine == "wikipedia" then
         local l = entry.lang or "zh"
@@ -930,12 +731,6 @@ local function buttonLabel(entry)
         return string.format(_("Wikipedia (%s)"), l:upper())
     elseif entry.engine == "moegirl" then
         return _("Moegirlpedia")
-    elseif entry.engine == "fandom" then
-        return _("Fandom")
-    elseif entry.engine == "bwiki" then
-        return _("Bilibili Game Wiki")
-    elseif entry.engine == "wiktionary" then
-        return _("Wiktionary")
     end
     return nil
 end
@@ -944,9 +739,74 @@ function DualWiki:init()
     self:_loadPluginLocale()
     if self.ui and self.ui.highlight then
         self:_registerHighlightButtons()
+        -- v1.3.5 (P1): single-word hold now lands on the selection page.
+        self:_installSelectionEntry()
+        -- v1.3.5 (P2): in-window ≥3s hold no longer flips to core wiki.
+        self:_patchWindowDomainSwitch()
+    end
+    -- v1.3.5 (F1b): moegirl fullpage windows drop the Save-as-EPUB button
+    -- (core's save path is wikipedia-only). Class-level patch — install
+    -- unconditionally, not gated on ui.highlight/doc presence.
+    self:_patchFullpageLayout()
+    -- v1.3.5 (P2): same-id takeover of the core "Wikipedia" button.
+    -- Core's button lives in DictQuickLookup's hardcoded pool and fired
+    -- lookupWikipedia() with its OWN language memory (the "searched EN,
+    -- title said ZH" split-brain). populatePluginButtons overwrites
+    -- pool[spec.id] with our spec whenever shown, so this spec re-wires the
+    -- same visible button into DualWiki:lookup — book-language plan, our
+    -- routing, our title. Book search ("search" id) is untouched.
+    -- v1.3.5 (F2): the takeover is a SETTING (default on). show_func is
+    -- evaluated per window build, so flipping it restores the native
+    -- button + its native fullscreen/EPUB channel on the very next lookup,
+    -- no restart needed.
+    -- v1.3.5 (F1b): moegirl fullpage windows drop the Save-as-EPUB button
+    -- (core's save path is wikipedia-only). Class-level patch — install
+    -- unconditionally, not gated on ui.highlight/doc presence.
+    self:_patchFullpageLayout()
+    if self.ui and self.ui.dictionary then
+        self.ui.dictionary:addToDictButtons({
+            id = "wikipedia",
+            text = _("Wikipedia"),
+            show_func = function() return self:_takeoverEnabled() end,
+            callback = function(dql_window)
+                local word = dql_window.lookupword or dql_window.word
+                if word and word ~= "" then
+                    self:lookup(word, "wikipedia", dql_window.word_boxes, self:_bookLang())
+                end
+            end,
+        })
+        -- v1.3.5 (F1/F1b): "Full article" — re-opens the
+        -- currently viewed candidate as an immersive fullpage window. Core's
+        -- fullpage bar is [Save as EPUB][Close] for wikipedia; moegirl gets
+        -- the same fullpage reading window with the Save button stripped
+        -- (_patchFullpageLayout) because core's save path can only fetch
+        -- from {lang}.wikipedia.org.
+        self.ui.dictionary:addToDictButtons({
+            id = "dualwiki_fullpage",
+            text = _("Full article"),
+            show_func = function(dql_window)
+                return (dql_window.dualwiki_engine == "wikipedia"
+                    or dql_window.dualwiki_engine == "moegirl")
+                    and not dql_window.is_wiki_fullpage
+            end,
+            callback = function(dql_window)
+                self:showFullpageResult(
+                    dql_window.lookupword or dql_window.word,
+                    dql_window.definition or "",
+                    dql_window.dualwiki_engine or "wikipedia",
+                    dql_window.lang or self:_bookLang(),
+                    dql_window.word_boxes)
+            end,
+        })
     end
     if self.ui and self.ui.menu then
         self.ui.menu:registerToMainMenu(self)
+        -- v1.3.5 (P2): ReaderWikipedia's three menu entries are registered
+        -- into Readermenu via registerToMainMenu and built lazily on menu
+        -- open (menu_items may not exist at plugin init time). The reliable
+        -- removal is done in addToMainMenu (below), which receives the
+        -- constructed menu_items table. Nothing to do here for the menu side;
+        -- the button side is already handled above in this init.
     end
 end
 
@@ -971,10 +831,66 @@ end
 local NEG_CACHE_TTL = 180
 local CACHE_MAX_ENTRIES = 32
 
+-- v1.3.5 (P1): unified selection entry — step 1 (收编词典，逐小步).
+-- Core's single-word hold-release fired ReaderHighlight:lookupDictWord(),
+-- which opened the native dictionary window directly ("diss" popup),
+-- bypassing the selection page entirely. This instance-level reroute sends
+-- every single-word hold to the selection page instead; the real dictionary
+-- stays one tap away via the page's own Dictionary button (core
+-- "06_dictionary" → lookupDict → dictionary:onLookupWord — untouched).
+function DualWiki:_installSelectionEntry()
+    local highlight = self.ui and self.ui.highlight
+    if not highlight or highlight._dualwiki_entry_patched then return end
+    highlight._dualwiki_entry_patched = true
+    highlight.lookupDictWord = function(hl_self)
+        hl_self:onShowHighlightMenu()
+    end
+    return true
+end
+
+-- v1.3.5 (P2): the ≥3s hold inside ANY result window used to flip domains
+-- into core ReaderWikipedia (DictQuickLookup:lookupDictionaryOrWikipedia →
+-- lookupWikipedia) — the last native-wiki door left after the button and
+-- menu takeover. Same-id takeover can't reach it (it is a method call, not
+-- a pool entry), so this class-level patch routes the wiki branch through
+-- DualWiki:lookup instead.
+-- v1.3.5 (P1 step 2): the SHORT hold inside a Dual Wiki result window is
+-- also collected — it re-runs the selection through OUR search dialog
+-- (word prefilled, ZH/EN/JA switch row available) instead of silently
+-- bouncing into the native dictionary window again. Dictionary-origin
+-- windows keep core behavior on both branches (no dualwiki_engine tag).
+function DualWiki:_patchWindowDomainSwitch()
+    if DictQuickLookup._dualwiki_domain_switch_patched then return end
+    DictQuickLookup._dualwiki_domain_switch_patched = true
+    local orig_ldow = DictQuickLookup.lookupDictionaryOrWikipedia
+    DictQuickLookup.lookupDictionaryOrWikipedia = function(dql_self, selected_text, switch_domain)
+        local dw = dql_self.ui and dql_self.ui.dual_wiki
+        -- v1.3.5 (F2): takeover off → both hold branches fall back to core
+        -- behavior (short hold re-opens native dict, ≥3s hold flips into
+        -- native ReaderWikipedia with its fullscreen/EPUB channel).
+        local is_ours = dw ~= nil and dql_self.dualwiki_engine ~= nil
+            and dw:_takeoverEnabled()
+        if is_ours and selected_text and selected_text ~= "" then
+            local word = util.cleanupSelectedText(selected_text)
+            if word and word ~= "" then
+                if switch_domain then
+                    dw:lookup(word, "wikipedia", dql_self.word_boxes, dw:_bookLang())
+                else
+                    local eng = dql_self.dualwiki_engine
+                    local lang = dql_self.lang or dw:_bookLang()
+                    dw:showSearchDialog(eng, word, dql_self.word_boxes, lang)
+                end
+                return true
+            end
+        end
+        return orig_ldow(dql_self, selected_text, switch_domain)
+    end
+end
+
 -- v1.3.3 (E8): single cache-write helpers shared by lookup() (positive +
 -- negative paths) and the highlight prewarm (silent prefetch into the same
 -- entries, so a button tap replays a cache hit verbatim).
-function DualWiki:_storeCacheEntry(cache_key, cands, is_full)
+function DualWiki:_storeCacheEntry(cache_key, cands, is_full, lang, needs_expand)
     if not cache_key then return end
     if not self._lookup_cache then self._lookup_cache = {} end
     local n = 0
@@ -990,7 +906,16 @@ function DualWiki:_storeCacheEntry(cache_key, cands, is_full)
         end
         if oldest_key then self._lookup_cache[oldest_key] = nil end
     end
-    self._lookup_cache[cache_key] = { cands = cands, is_full = is_full and true or false, at = os.time() }
+    -- v1.3.5 (P3): remember which language this entry's content is actually
+    -- in so cache replays title the window correctly.
+    -- v1.3.5 (G2c): prewarm entries land UNEXPANDED (needs_expand) so the
+    -- highlight menu never pays full-text fetches on the UI thread; the
+    -- button tap expands the top candidate behind the progress message.
+    self._lookup_cache[cache_key] = {
+        cands = cands, is_full = is_full and true or false,
+        needs_expand = needs_expand and true or nil,
+        at = os.time(), lang = lang,
+    }
 end
 
 function DualWiki:_storeMissEntry(cache_key)
@@ -1049,51 +974,33 @@ function DualWiki:_registerHighlightButtons()
         highlight._highlight_buttons["05_wikipedia"] = nil
     end
 
-    -- v1.3.0: two DYNAMIC button slots (replacing the five hard-coded ones).
-    -- The factory re-runs on every highlight-menu invocation, reading the
-    -- book language (with per-book / global lock applied) at that moment —
-    -- button text, visibility and target engine all resolve live, so buttons
-    -- always match the current book and any later lock changes.
-    -- Slot A: book's own language engine.
-    highlight:addToHighlightDialog("05_a_dualwiki_primary", function(hl)
-        local entry = self:_primaryButton()
-        return {
-            text = (entry and buttonLabel(entry)) or "",
-            show_in_highlight_dialog_func = function()
-                return hl.selected_text ~= nil and self:_primaryButton() ~= nil
-            end,
-            callback = function()
-                local e = self:_primaryButton()
-                if not e or not hl.selected_text then return end
-                local word = util.cleanupSelectedText(hl.selected_text.text)
-                if not word or word == "" then return end
-                local word_boxes = hl:getHighlightVisibleBoxes() or (hl.selected_text.sboxes or hl.selected_text.pboxes)
-                UIManager:scheduleIn(0.1, function()
-                    self:lookup(word, e.engine, word_boxes, e.lang)
-                end)
-            end,
-        }
-    end)
-    -- Slot B: secondary engine (cross-language assist / pop-culture).
-    highlight:addToHighlightDialog("05_b_dualwiki_secondary", function(hl)
-        local entry = self:_secondaryButton()
-        return {
-            text = (entry and buttonLabel(entry)) or "",
-            show_in_highlight_dialog_func = function()
-                return hl.selected_text ~= nil and self:_secondaryButton() ~= nil
-            end,
-            callback = function()
-                local e = self:_secondaryButton()
-                if not e or not hl.selected_text then return end
-                local word = util.cleanupSelectedText(hl.selected_text.text)
-                if not word or word == "" then return end
-                local word_boxes = hl:getHighlightVisibleBoxes() or (hl.selected_text.sboxes or hl.selected_text.pboxes)
-                UIManager:scheduleIn(0.1, function()
-                    self:lookup(word, e.engine, word_boxes, e.lang)
-                end)
-            end,
-        }
-    end)
+    -- Two DYNAMIC button slots. The factories re-run on every highlight-menu
+    -- invocation, reading the book language (with per-book lock applied) at
+    -- that moment — button text, visibility and target engine all resolve
+    -- live, so buttons always match the current book and any later lock
+    -- changes. Slot A: book's own language engine; Slot B: the assist entry.
+    local function registerSlot(slot_id, get_entry)
+        highlight:addToHighlightDialog(slot_id, function(hl)
+            return {
+                text = (get_entry() and buttonLabel(get_entry())) or "",
+                show_in_highlight_dialog_func = function()
+                    return hl.selected_text ~= nil and get_entry() ~= nil
+                end,
+                callback = function()
+                    local e = get_entry()
+                    if not e or not hl.selected_text then return end
+                    local word = util.cleanupSelectedText(hl.selected_text.text)
+                    if not word or word == "" then return end
+                    local word_boxes = hl:getHighlightVisibleBoxes() or (hl.selected_text.sboxes or hl.selected_text.pboxes)
+                    UIManager:scheduleIn(0.1, function()
+                        self:lookup(word, e.engine, word_boxes, e.lang)
+                    end)
+                end,
+            }
+        end)
+    end
+    registerSlot("05_a_dualwiki_primary", function() return self:_primaryButton() end)
+    registerSlot("05_b_dualwiki_secondary", function() return self:_secondaryButton() end)
 
     -- v1.3.3 (E8): highlight prewarm. The primary-slot factory runs exactly
     -- when the highlight menu opens — that moment is the earliest signal
@@ -1102,12 +1009,13 @@ function DualWiki:_registerHighlightButtons()
     -- network round), the primary button's query is prefetched silently
     -- into the session cache, so tapping the button replays a cache hit.
     -- Never shows UI, never writes error state; transport failures simply
-    -- leave no entry. Disabled via the settings toggle (default on).
+    -- leave no entry. OPT-IN via the settings toggle (default OFF — costs
+    -- one background request per highlight; heavy users enable it).
     -- NOTE: the factory MUST return a well-formed button table — core
     -- onShowHighlightMenu indexes the return value unconditionally — so the
     -- "no prewarm" cases return a never-shown placeholder instead of nil.
     highlight:addToHighlightDialog("05_c_dualwiki_prewarm", function(hl)
-        local enabled = not (G_reader_settings and G_reader_settings:readSetting("dualwiki_prewarm_off"))
+        local enabled = G_reader_settings and G_reader_settings:isTrue("dualwiki_prewarm")
         local entry = enabled and self:_primaryButton() or nil
         local word = (entry and hl.selected_text) and util.cleanupSelectedText(hl.selected_text.text) or nil
         if enabled and entry and word and word ~= "" and utf8Len(word) <= 60 then
@@ -1138,14 +1046,26 @@ function DualWiki:_registerHighlightButtons()
                     and os.time() - (cached.at or 0) < NEG_CACHE_TTL then
                     return -- recently missed: don't re-burn the ladder
                 end
-                local ok, cands, is_full = pcall(function()
+                local ok, cands = pcall(function()
                     return self:queryPipeline(word, entry.engine, prewarm_lang)
                 end)
                 if ok and type(cands) == "table" and #cands > 0 and not self._last_error_kind then
-                    if not (ENGINES[entry.engine] and ENGINES[entry.engine].fullTextViaParse) then
-                        cands = self:augmentLangLinks(cands, entry.engine, prewarm_lang)
+                    -- v1.3.5 (P3): pipeline may have switched language
+                    -- internally (Stage 3); use the effective one for the
+                    -- langlink bridge AND the cache entry.
+                    local effective_lang = self._last_effective_lang or prewarm_lang
+                    self._last_effective_lang = nil
+                    if self:_langlinkEnabled() then
+                        cands = self:augmentLangLinks(cands, entry.engine, effective_lang)
                     end
-                    self:_storeCacheEntry(cache_key, cands, is_full)
+                    -- v1.3.5 (G2c): the prewarm runs on the UI thread 0.6 s
+                    -- after the highlight menu opens — full-text fetches here
+                    -- (50 KB-1 MB JSON each) froze the menu for seconds, and
+                    -- with it every tap (dictionary included). Land the cheap
+                    -- probe result marked needs_expand; the button tap does
+                    -- the single top-candidate expansion behind the progress
+                    -- message.
+                    self:_storeCacheEntry(cache_key, cands, false, effective_lang, true)
                 elseif ok and not self._last_error_kind then
                     self:_storeMissEntry(cache_key)
                 end
@@ -1163,60 +1083,14 @@ function DualWiki:_registerHighlightButtons()
     end)
 end
 
--- v1.3.0: resolve the current book's button plan. lang == "fandom-sub" means
--- the lang slot carries the Fandom community subdomain (resolved at lookup
--- time so a settings change applies immediately).
--- v1.3.3 (E9): an explicit preferred engine (per-book or global) puts its
--- button in slot 1; the best remaining default-plan entry fills slot 2.
-function DualWiki:_preferredEngine()
-    local ds = self.ui and self.ui.doc_settings
-    if ds and ds.readSetting then
-        local locked = ds:readSetting("dualwiki_engine_lock")
-        if locked and ENGINES[locked] then return locked end
-    end
-    local global = G_reader_settings and G_reader_settings:readSetting("dualwiki_engine")
-    if global and ENGINES[global] then return global end
-    return nil
-end
-
-local function engineDefaultLang(self, engine)
-    local book_lang = self:_bookLang()
-    if engine == "wikipedia" then return book_lang end
-    if engine == "moegirl" then return (book_lang == "ja") and "ja" or "zh" end
-    if engine == "fandom" then return self:_defaultFandomSub() end
-    if engine == "bwiki" then return ENGINES.bwiki.defaultSub() end
-    if engine == "wiktionary" then
-        return (book_lang == "zh" or book_lang == "ja") and book_lang or "en"
-    end
-    return nil
-end
-
+-- v1.3.0: resolve the current book's button plan (two dynamic slots whose
+-- factories re-read the book language on every highlight-menu invocation).
 function DualWiki:_planButtons()
     local lang = self:_bookLang()
     local plan = BOOK_BUTTON_PLANS[lang] or BOOK_BUTTON_PLANS.zh
-    local preferred = self:_preferredEngine()
-    if preferred then
-        local plang = engineDefaultLang(self, preferred)
-        if plang then
-            local buttons = { { engine = preferred, lang = plang } }
-            for _, entry in ipairs(plan) do
-                if entry.engine ~= preferred then
-                    buttons[#buttons + 1] = {
-                        engine = entry.engine,
-                        lang = entry.lang == "fandom-sub" and self:_defaultFandomSub() or entry.lang,
-                    }
-                end
-            end
-            return buttons
-        end
-    end
     local buttons = {}
     for _, entry in ipairs(plan) do
-        local e = {
-            engine = entry.engine,
-            lang = entry.lang == "fandom-sub" and self:_defaultFandomSub() or entry.lang,
-        }
-        buttons[#buttons + 1] = e
+        buttons[#buttons + 1] = { engine = entry.engine, lang = entry.lang }
     end
     return buttons
 end
@@ -1229,17 +1103,38 @@ function DualWiki:_secondaryButton()
     return self:_planButtons()[2]
 end
 
--- v1.3.0: language-lock picker rows shared by the global and per-book menus.
--- value nil means "auto" (context-aware detection).
-local LANG_LOCK_CHOICES = { "auto", "zh", "en", "ja", "de", "fr", "es", "ru" }
+-- Core choices always visible; de/fr/es/ru surface only when the
+-- current book is that language (平时隐藏，相对应的书才供应).
+local LANG_LOCK_CHOICES_CORE = { "auto", "zh", "en", "ja" }
+local LANG_LOCK_EU = { de = true, fr = true, es = true, ru = true }
+local LANG_LOCK_NAMES = {
+    zh = _("Chinese (ZH)"), en = _("English (EN)"), ja = _("Japanese (JA)"),
+    de = _("German (DE)"), fr = _("French (FR)"), es = _("Spanish (ES)"), ru = _("Russian (RU)"),
+}
+local function langLockChoicesForThisBook(self)
+    local normalized = normalizeLang(self:_rawBookLanguage())
+    local choices = { unpack(LANG_LOCK_CHOICES_CORE) }
+    local present = {}
+    for _, c in ipairs(choices) do present[c] = true end
+    local function add(code)
+        if LANG_LOCK_EU[code] and not present[code] then
+            present[code] = true
+            choices[#choices + 1] = code
+        end
+    end
+    add(normalized) -- the book's own language
+    -- also surface any EU language the user has explicitly locked (so they
+    -- can switch back without reopening a book of that language)
+    local ds = self.ui and self.ui.doc_settings
+    local bv = ds and ds:readSetting("dualwiki_lang_lock") or nil
+    local gv = G_reader_settings and G_reader_settings:readSetting("dualwiki_lang") or nil
+    add(bv ~= "auto" and bv or nil)
+    add(gv ~= "auto" and gv or nil)
+    return choices
+end
 local function langLockText(code)
     if code == "auto" then return _("Auto (detect from book)") end
-    local names = {
-        zh = _("Chinese (ZH)"), en = _("English (EN)"), ja = _("Japanese (JA)"),
-        de = _("German (DE)"), fr = _("French (FR)"), es = _("Spanish (ES)"),
-        ru = _("Russian (RU)"),
-    }
-    return names[code] or code
+    return LANG_LOCK_NAMES[code] or code
 end
 
 local function langLockRadioRow(self, code, scope)
@@ -1278,182 +1173,148 @@ local function langLockRadioRow(self, code, scope)
     }
 end
 
--- v1.3.3 (E9): preferred-engine picker rows, same radio pattern as the
--- language locks. "auto" (nil) keeps the book-language button plan; an
--- explicit engine pins that engine's button into slot 1 (per-book wins over
--- global). Only engines whose default lang resolves for THIS book are
--- offered — the menu is built per invocation, so it always reflects the
--- current document.
-local ENGINE_CHOICES = { "auto", "wikipedia", "moegirl", "fandom", "bwiki", "wiktionary" }
-local function engineChoiceText(code)
-    if code == "auto" then return _("Auto (book language plan)") end
-    return ENGINES[code].label(code == "wikipedia" and "zh" or (code == "wiktionary" and "en" or nil))
-end
-
-local function engineRadioRow(self, code, scope)
-    local get, save
-    if scope == "book" then
-        get = function()
-            local ds = self.ui and self.ui.doc_settings
-            return ds and ds:readSetting("dualwiki_engine_lock") or "auto"
-        end
-        save = function(value)
-            local ds = self.ui and self.ui.doc_settings
-            if not ds then return end
-            if value == "auto" then
-                ds:delSetting("dualwiki_engine_lock")
-            else
-                ds:saveSetting("dualwiki_engine_lock", value)
-            end
-        end
-    else
-        get = function()
-            return G_reader_settings and G_reader_settings:readSetting("dualwiki_engine") or "auto"
-        end
-        save = function(value)
-            if value == "auto" then
-                G_reader_settings:delSetting("dualwiki_engine")
-            else
-                G_reader_settings:saveSetting("dualwiki_engine", value)
-            end
-        end
-    end
-    return {
-        text = engineChoiceText(code),
-        checked_func = function() return get() == code end,
-        radio = true,
-        callback = function() save(code) end,
-    }
-end
-
 function DualWiki:addToMainMenu(menu_items)
-    menu_items.dualwiki_moegirl = {
-        text = _("Moegirlpedia lookup"),
-        sorting_hint = "search",
-        callback = function()
-            self:showSearchDialog("moegirl", nil, nil, "zh")
-        end,
-    }
-    -- v1.3.2: ONE Wikipedia search entry that follows the current book's
-    -- language (was: fixed zh/en/ja trio, which left de/fr/es/ru books with
-    -- no manual Wikipedia path — user-acceptance finding). The language is
-    -- resolved when the menu opens so the dialog title states it.
-    menu_items.dualwiki_wikipedia = {
-        text_func = function()
-            return T(_("Wikipedia lookup (%1)"), self:_bookLang():upper())
-        end,
-        sorting_hint = "search",
-        callback = function()
-            self:showSearchDialog("wikipedia", nil, nil, self:_bookLang())
-        end,
-    }
-    menu_items.dualwiki_wikipedia_en = {
-        text = _("Wikipedia lookup (English)"),
-        sorting_hint = "search",
-        callback = function()
-            self:showSearchDialog("wikipedia", nil, nil, "en")
-        end,
-    }
-    menu_items.dualwiki_wikipedia_ja = {
-        text = _("Wikipedia lookup (Japanese)"),
-        sorting_hint = "search",
-        callback = function()
-            self:showSearchDialog("wikipedia", nil, nil, "ja")
-        end,
-    }
-    menu_items.dualwiki_wiktionary = {
-        text = _("Wiktionary lookup"),
-        sorting_hint = "search",
-        callback = function()
-            self:showSearchDialog("wiktionary", nil, nil, "en")
-        end,
-    }
-    menu_items.dualwiki_fandom = {
-        text = _("Fandom lookup"),
-        sorting_hint = "search",
-        callback = function()
-            self:showSearchDialog("fandom", nil, nil, self:_defaultFandomSub())
-        end,
-    }
-    menu_items.dualwiki_bwiki = {
-        text = _("Bilibili Game Wiki lookup"),
-        sorting_hint = "search",
-        callback = function()
-            self:showSearchDialog("bwiki", nil, nil, ENGINES.bwiki.defaultSub())
-        end,
+    -- v1.3.5 (P2/F2): remove the three legacy ReaderWikipedia
+    -- entries registered by core ReaderWikipedia (lookup / history /
+    -- settings) — but ONLY while takeover is enabled (default). With
+    -- takeover off, core keeps its entries AND its native fullscreen +
+    -- Save-as-EPUB channel; Dual Wiki then competes purely on merit.
+    -- ReaderMenu materializes menu_items lazily at menu-open, and its
+    -- tab_item_table cache is rebuilt after any reader restart, so a
+    -- toggle takes effect on the next menu open.
+    if self:_takeoverEnabled() then
+        menu_items.wikipedia_lookup = nil
+        menu_items.wikipedia_history = nil
+        menu_items.wikipedia_settings = nil
+    end
+
+    -- "Dual Wiki" submenu: manual lookups + settings.
+    local lookup_items = {
+        {
+            text = _("Moegirlpedia lookup"),
+            callback = function()
+                self:showSearchDialog("moegirl", nil, nil, "zh")
+            end,
+        },
+        -- ONE Wikipedia search entry that follows the current book's
+        -- language, resolved when the menu opens so the dialog title
+        -- states it; plus fixed EN/JA entries.
+        {
+            text_func = function()
+                return T(_("Wikipedia lookup (%1)"), self:_bookLang():upper())
+            end,
+            callback = function()
+                self:showSearchDialog("wikipedia", nil, nil, self:_bookLang())
+            end,
+        },
+        {
+            text = _("Wikipedia lookup (English)"),
+            callback = function()
+                self:showSearchDialog("wikipedia", nil, nil, "en")
+            end,
+        },
+        {
+            text = _("Wikipedia lookup (Japanese)"),
+            callback = function()
+                self:showSearchDialog("wikipedia", nil, nil, "ja")
+            end,
+        },
     }
 
     -- v1.3.0: settings hub (兑现第五节第 3 条的语种锁定 UI).
-    -- v1.3.3 (E9): preferred-engine pickers — per-book wins over global.
-    -- Engine rows are built per invocation so ENGINES labels and this
-    -- book's resolvable engines stay current.
-    local function engineRadioRows(scope)
-        local rows = {}
-        for _, code in ipairs(ENGINE_CHOICES) do
-            rows[#rows + 1] = engineRadioRow(self, code, scope)
-        end
-        return rows
-    end
     local settings_sub = {
         {
-            text = _("Language lock (this book)"),
-            sub_item_table = (function()
+            text_func = function()
+                -- show count hint when EU choices are surfaced, otherwise plain
+                local n = #langLockChoicesForThisBook(self)
+                if n > 4 then return _("Language lock (this book) *") end
+                return _("Language lock (this book)")
+            end,
+            sub_item_table_func = function()
                 local rows = {}
-                for _, code in ipairs(LANG_LOCK_CHOICES) do
+                for _, code in ipairs(langLockChoicesForThisBook(self)) do
                     rows[#rows + 1] = langLockRadioRow(self, code, "book")
                 end
                 return rows
-            end)(),
+            end,
         },
         {
-            text = _("Language lock (global default)"),
-            sub_item_table = (function()
+            text_func = function()
+                local n = #langLockChoicesForThisBook(self)
+                if n > 4 then return _("Language lock (global default) *") end
+                return _("Language lock (global default)")
+            end,
+            sub_item_table_func = function()
                 local rows = {}
-                for _, code in ipairs(LANG_LOCK_CHOICES) do
+                for _, code in ipairs(langLockChoicesForThisBook(self)) do
                     rows[#rows + 1] = langLockRadioRow(self, code, "global")
                 end
                 return rows
-            end)(),
+            end,
         },
         {
-            text = _("Preferred engine (this book)"),
-            sub_item_table = engineRadioRows("book"),
-        },
-        {
-            text = _("Preferred engine (global default)"),
-            sub_item_table = engineRadioRows("global"),
-        },
-        {
-            -- v1.3.3 (E8): highlight-menu prewarm toggle (default on).
-            text = _("Prewarm lookup on highlight"),
+            -- v1.3.5 (F1/F1b): immersive reading — wikipedia and
+            -- moegirl results (which G2 already fills with full article
+            -- text) open as fullpage windows. Wikipedia keeps core's
+            -- [Save as EPUB][Close]; moegirl shows [Close] only (its save
+            -- path is wikipedia-only, stripped by _patchFullpageLayout).
+            text = _("Open results fullscreen by default"),
             checked_func = function()
-                return not (G_reader_settings and G_reader_settings:readSetting("dualwiki_prewarm_off"))
+                return G_reader_settings ~= nil and G_reader_settings:isTrue("dualwiki_fullpage")
             end,
             callback = function()
-                if G_reader_settings:readSetting("dualwiki_prewarm_off") then
-                    G_reader_settings:delSetting("dualwiki_prewarm_off")
+                if G_reader_settings:isTrue("dualwiki_fullpage") then
+                    G_reader_settings:delSetting("dualwiki_fullpage")
                 else
-                    G_reader_settings:saveSetting("dualwiki_prewarm_off", true)
+                    G_reader_settings:saveSetting("dualwiki_fullpage", true)
                 end
             end,
         },
         {
-            text_func = function()
-                return T(_("Fandom community: %1"), self:_defaultFandomSub())
+            -- v1.3.5 (F2): native Wikipedia takeover, default ON. When off,
+            -- core keeps its menu entries, its dict button, and its native
+            -- fullscreen + EPUB channel; the change applies to the next
+            -- window/menu build (no restart needed for lookups).
+            text = _("Take over native Wikipedia entry points"),
+            checked_func = function()
+                return self:_takeoverEnabled()
             end,
-            keep_menu_open = true,
-            callback = function(touchmenu_instance)
-                self:_promptForSubdomain("dualwiki_fandom_community", "starwars", touchmenu_instance)
+            callback = function()
+                if self:_takeoverEnabled() then
+                    G_reader_settings:saveSetting("dualwiki_no_takeover", true)
+                else
+                    G_reader_settings:delSetting("dualwiki_no_takeover")
+                end
             end,
         },
         {
-            text_func = function()
-                local sub = ENGINES.bwiki.defaultSub()
-                return T(_("Bilibili game wiki: %1"), sub)
+            -- v1.3.3 (E8): highlight-menu prewarm, OPT-IN (default OFF):
+            -- costs one background request per highlight; heavy users enable.
+            text = _("Prewarm lookup on highlight"),
+            checked_func = function()
+                return G_reader_settings and G_reader_settings:isTrue("dualwiki_prewarm")
             end,
-            keep_menu_open = true,
-            callback = function(touchmenu_instance)
-                self:_promptForSubdomain("dualwiki_bwiki_sub", "ys", touchmenu_instance)
+            callback = function()
+                if G_reader_settings:isTrue("dualwiki_prewarm") then
+                    G_reader_settings:delSetting("dualwiki_prewarm")
+                else
+                    G_reader_settings:saveSetting("dualwiki_prewarm", true)
+                end
+            end,
+        },
+        {
+            -- v1.3.3 (E2): cross-language bridge, OPT-IN (default OFF):
+            -- one langlinks request per pipeline; adds a "→ XX" pseudo-candidate.
+            text = _("Cross-language suggestions"),
+            checked_func = function()
+                return G_reader_settings and G_reader_settings:isTrue("dualwiki_langlink")
+            end,
+            callback = function()
+                if G_reader_settings:isTrue("dualwiki_langlink") then
+                    G_reader_settings:delSetting("dualwiki_langlink")
+                else
+                    G_reader_settings:saveSetting("dualwiki_langlink", true)
+                end
             end,
         },
         {
@@ -1468,53 +1329,27 @@ function DualWiki:addToMainMenu(menu_items)
             end,
         },
     }
-    menu_items.dualwiki_settings = {
-        text = _("Dual Wiki settings"),
+    menu_items.dualwiki = {
+        text = _("Dual Wiki"),
         sorting_hint = "search",
-        sub_item_table = settings_sub,
+        sub_item_table = (function()
+            local items = {}
+            for _, item in ipairs(lookup_items) do
+                table.insert(items, item)
+            end
+            table.insert(items, {
+                text = _("Dual Wiki settings"),
+                sub_item_table = settings_sub,
+            })
+            return items
+        end)(),
     }
 end
-
--- v1.3.0: subdomain prompt shared by Fandom community / BWiki game settings.
-function DualWiki:_promptForSubdomain(setting_key, default_value, touchmenu_instance)
-    local dialog
-    dialog = InputDialog:new{
-        title = _("Enter wiki subdomain"),
-        description = T(_("e.g. %1"), default_value),
-        input = G_reader_settings:readSetting(setting_key) or default_value,
-        input_type = "text",
-        buttons = {
-            {
-                {
-                    text = _("Cancel"),
-                    id = "close",
-                    callback = function()
-                        UIManager:close(dialog)
-                    end,
-                },
-                {
-                    text = _("Save"),
-                    is_enter_default = true,
-                    callback = function()
-                        -- DNS label limit is 63 chars; same charset rule as
-                        -- the read paths below (lowercase alnum + hyphen).
-                        local value = tostring(dialog:getInputText() or ""):lower():gsub("[^%a%d%-]", ""):sub(1, 63)
-                        if value == "" then value = default_value end
-                        G_reader_settings:saveSetting(setting_key, value)
-                        -- v1.3.2: the lookup cache key is engine|lang|word — it
-                        -- does NOT include the subdomain. Without this clear, a
-                        -- subdomain switch keeps serving the previous
-                        -- community's cached results for identical words.
-                        self._lookup_cache = nil
-                        UIManager:close(dialog)
-                        if touchmenu_instance then touchmenu_instance:updateItems() end
-                    end,
-                },
-            },
-        },
-    }
-    UIManager:show(dialog)
-    dialog:onShowKeyboard()
+-- v1.3.3 (E2): cross-language bridge gate. OPT-IN (default OFF) per user
+-- direction — the extra langlinks request and the "→ XX" pseudo-candidate
+-- are noise for most lookups; heavy users enable it in settings.
+function DualWiki:_langlinkEnabled()
+    return G_reader_settings ~= nil and G_reader_settings:isTrue("dualwiki_langlink")
 end
 
 function DualWiki:showSearchDialog(engine, initial_query, word_boxes, lang)
@@ -1522,6 +1357,34 @@ function DualWiki:showSearchDialog(engine, initial_query, word_boxes, lang)
     if not cfg then return end
     local title = _("Article lookup") .. " · " .. cfg.label(lang)
     local input_dialog
+    -- v1.3.5 (P3): explicit language switch inside the search dialog. The
+    -- title's language label now always states where results come from, and
+    -- the user can override it with one tap instead of fighting book-language
+    -- defaults or core language memory.
+    local lang_switch_row = nil
+    local lang_choices = ({
+        wikipedia = { "zh", "en", "ja" },
+        moegirl = { "zh", "ja" },
+    })[engine]
+    if lang_choices and #lang_choices > 1 then
+        lang_switch_row = {}
+        for _, code in ipairs(lang_choices) do
+            table.insert(lang_switch_row, {
+                text = code:upper(),
+                enabled = code ~= lang,
+                callback = function()
+                    local query = input_dialog:getInputText()
+                    UIManager:close(input_dialog)
+                    if query and strTrim(query) ~= "" then
+                        self:lookup(strTrim(query), engine, word_boxes, code)
+                    else
+                        -- nothing typed yet: re-open with the new language
+                        self:showSearchDialog(engine, initial_query, word_boxes, code)
+                    end
+                end,
+            })
+        end
+    end
     input_dialog = InputDialog:new{
         title = title,
         input = initial_query or "",
@@ -1555,6 +1418,7 @@ function DualWiki:showSearchDialog(engine, initial_query, word_boxes, lang)
                     end,
                 },
             },
+            lang_switch_row,
         },
     }
     UIManager:show(input_dialog)
@@ -1564,7 +1428,6 @@ end
 -- Merged probe request: one HTTP round-trip returns up to MAX_CANDIDATES
 -- ranked candidates, each with a readable intro summary (exintro mode keeps
 -- exlimit unclamped; full-text mode is server-clamped to 1 page).
--- Fandom lacks TextExtracts, so candidates there are title-only.
 -- mode: "prefix" (generator=prefixsearch) or "search" (generator=search).
 function DualWiki:fetchCandidates(q, engine, lang, mode)
     local esc_q = socket_url.escape(q)
@@ -1582,22 +1445,15 @@ function DualWiki:fetchCandidates(q, engine, lang, mode)
     else
         params = string.format("&generator=prefixsearch&gpssearch=%s&gpslimit=%d", esc_q, MAX_CANDIDATES)
     end
-    if ENGINES[engine] and ENGINES[engine].fullTextViaParse then
-        -- v1.3.0: parse engines (Fandom / BWiki / Wiktionary) ship no
-        -- TextExtracts — request title-only candidates, skip the extracts
-        -- block entirely (avoids per-wiki "Unrecognized parameter" noise).
-        params = params .. "&redirects=1&format=json&formatversion=2"
-    else
-        -- v1.3.3 (A1): pageprops piggybacks the Disambiguator flag on the
-        -- same merged request; core prop, so moegirl tolerates it even
-        -- without the extension (flag just never fires there).
-        -- v1.3.3 (E5): exlimit follows the generator's limit so all 8
-        -- search candidates carry intro extracts in the same request.
-        local limit = (mode == "search") and MAX_SEARCH_CANDIDATES or MAX_CANDIDATES
-        params = params
-            .. "&prop=extracts|pageprops&ppprop=disambiguation&explaintext=1&exintro=1&exlimit=" .. limit
-            .. "&redirects=1&format=json&formatversion=2"
-    end
+    -- v1.3.3 (A1): pageprops piggybacks the Disambiguator flag on the same
+    -- merged request; core prop, so moegirl tolerates it even without the
+    -- extension (flag just never fires there).
+    -- v1.3.3 (E5): exlimit follows the generator's limit so all 8 search
+    -- candidates carry intro extracts in the same request.
+    local limit = (mode == "search") and MAX_SEARCH_CANDIDATES or MAX_CANDIDATES
+    params = params
+        .. "&prop=extracts|pageprops&ppprop=disambiguation&explaintext=1&exintro=1&exlimit=" .. limit
+        .. "&redirects=1&format=json&formatversion=2"
     if ENGINES[engine] and ENGINES[engine].needsConverttitles(lang) then
         params = params .. "&converttitles=1&variant=" .. zhVariantOf(self:_rawBookLanguage())
     end
@@ -1634,7 +1490,6 @@ end
 -- (exintro mode allows exlimit beyond the full-text clamp of 1). Any
 -- failure degrades to the original dab result set (expandDisambiguation).
 function DualWiki:fetchDisambiguationItems(dab_title, engine, lang)
-    if ENGINES[engine] and ENGINES[engine].fullTextViaParse then return nil end
     -- action=parse is NOT a query action — build the URL directly instead
     -- of buildApiURL (which would emit a duplicate action=query).
     local cfg = ENGINES[engine]
@@ -1817,63 +1672,6 @@ function DualWiki:augmentLangLinks(cands, engine, lang)
     return cands
 end
 
--- v1.3.3 (E1): sitelink notability re-rank. When NO exact hit exists and
--- the top candidate has no real content (short extract), one batched
--- wbgetentities call fetches sitelink counts for every QID in the set and
--- the most-linked entity (genuinely notable topic: Q48273 "Bande" → 74
--- wikis) moves to the front, ahead of stub noise. Hard red lines: EXACT
--- hits and dab pages are NEVER demoted, and any failure keeps the server
--- order untouched.
-function DualWiki:notabilityReRank(cands, engine, lang)
-    if type(cands) ~= "table" or #cands < 2 then return cands end
-    if cands[1].exact or cands[1].dab then return cands end
-    if #(cands[1].extract or "") >= 60 then return cands end
-    local qids = {}
-    for _, c in ipairs(cands) do
-        if type(c.qid) == "string" then qids[#qids + 1] = c.qid end
-    end
-    if #qids < 2 then return cands end
-    local url = "https://www.wikidata.org/w/api.php?action=wbgetentities&props=sitelinks"
-        .. "&ids=" .. socket_url.escape(table.concat(qids, "|"))
-        .. "&format=json&formatversion=2"
-    local ok, body = httpGet(url, PROBE_TIMEOUT)
-    if not ok or not body then return cands end
-    local ok_json, data = pcall(JSON.decode, body)
-    if not ok_json or type(data) ~= "table" or type(data.entities) ~= "table" then
-        return cands
-    end
-    local counts = {}
-    for qid, entity in pairs(data.entities) do
-        local n = 0
-        if type(entity) == "table" and type(entity.sitelinks) == "table" then
-            for site in pairs(entity.sitelinks) do
-                if type(site) == "string" and site:sub(-4) == "wiki" then
-                    n = n + 1
-                end
-            end
-        end
-        counts[qid] = n
-    end
-    local top, top_n = cands[1], counts[cands[1].qid] or 0
-    for i = 2, #cands do
-        local c = cands[i]
-        if c.qid and not c.dab and not c.exact then
-            local n = counts[c.qid] or 0
-            -- Only promote on a CLEAR notability margin (≥2×) so near-ties
-            -- keep the server's prefix-relevance order.
-            if n >= top_n * 2 and n >= 8 then
-                top, top_n = c, n
-            end
-        end
-    end
-    if top == cands[1] then return cands end
-    local out = { top }
-    for _, c in ipairs(cands) do
-        if c ~= top then out[#out + 1] = c end
-    end
-    return out
-end
-
 -- Direct single-page full-article fetch (used by same-word pencil confirm).
 -- formatversion=2 returns pages as an array; redirects are server-expanded.
 function DualWiki:fetchDirect(word, engine, lang)
@@ -1904,6 +1702,43 @@ function DualWiki:fetchDirect(word, engine, lang)
     return nil
 end
 
+-- v1.3.5 (G2c, burn-in perf finding): expand ONLY the top candidate. The
+-- window opens on it, so the first screen is always the full article (the
+-- user-facing G2 contract), while the remaining candidates keep their cheap
+-- lead summaries. A full-page response is 50 KB-1 MB of JSON to decode;
+-- doing that for N candidates synchronously on the UI thread froze the
+-- highlight menu for seconds (and with it the whole app — taps on any
+-- button, the dictionary included, only processed after the freeze). The
+-- probe stays cheap; the one heavy fetch happens behind the progress
+-- dialog. A structurally failed top fetch keeps its lead; a TRANSPORT
+-- failure leaves _last_error_kind set so the round is never cached (E6).
+function DualWiki:_expandAllFullText(cands, engine, lang)
+    if type(cands) ~= "table" or #cands == 0 then return cands, false end
+    local cand = cands[1]
+    local fetch_engine = engine
+    local fetch_lang = lang
+    if cand.langlink_lang then
+        -- E2 pseudo-entry lives on the target-language wikipedia
+        fetch_engine = "wikipedia"
+        fetch_lang = cand.langlink_lang
+    end
+    local full = self:fetchDirect(cand.title, fetch_engine, fetch_lang)
+    if full and full[1] and type(full[1].extract) == "string"
+        and utf8Len(full[1].extract) > utf8Len(cand.extract or "") then
+        cands[1] = {
+            title = cand.title,
+            extract = full[1].extract,
+            index = cand.index or 1,
+            exact = cand.exact,
+            dab = cand.dab,
+            dab_item = cand.dab_item,
+            langlink_lang = cand.langlink_lang,
+            langlink_from = cand.langlink_from,
+        }
+    end
+    return cands, true
+end
+
 -- v1.3.3 (E2): pencil on a cross-language pseudo-candidate — fetch the
 -- equivalent article's full text in the target language and show it as a
 -- one-result window (full-text flow, no further network round).
@@ -1914,84 +1749,6 @@ function DualWiki:fetchDirectAndShow(word, engine, lang, word_boxes)
     else
         self:showRetryDialog(word, engine, word_boxes, lang)
     end
-end
-
--- v1.3.3 (E4): pencil on a candidate carrying a Wikidata QID — resolve the
--- entity's article in the reader's language (book language first, then zh,
--- then en) and load that full text. One wbgetentities call (sitelinks only)
--- plus one fetchDirect round; any failure degrades to the normal search
--- dialog so the pencil never dead-ends.
-function DualWiki:fetchWikidataFullAndShow(qid, word_boxes)
-    local url = "https://www.wikidata.org/w/api.php?action=wbgetentities&props=sitelinks"
-        .. "&ids=" .. socket_url.escape(qid) .. "&format=json&formatversion=2"
-    local ok, body = httpGet(url, PROBE_TIMEOUT)
-    if not ok or type(body) ~= "string" then
-        self:showSearchDialog("wikipedia", nil, word_boxes, self:_bookLang())
-        return
-    end
-    local ok_json, data = pcall(JSON.decode, body)
-    local entity = ok_json and type(data) == "table" and type(data.entities) == "table"
-        and data.entities[qid] or nil
-    local sitelinks = entity and type(entity.sitelinks) == "table" and entity.sitelinks or nil
-    -- Book language first, then zh, then en — deduped (an en book must not
-    -- probe the en sitelink twice).
-    local book_lang = self:_bookLang()
-    local try_langs = { book_lang }
-    if book_lang ~= "zh" then try_langs[#try_langs + 1] = "zh" end
-    if book_lang ~= "en" then try_langs[#try_langs + 1] = "en" end
-    for _, lang in ipairs(try_langs) do
-        local sl = sitelinks and sitelinks[lang .. "wiki"]
-        if type(sl) == "table" and type(sl.title) == "string" and sl.title ~= "" then
-            self:fetchDirectAndShow(sl.title, "wikipedia", lang, word_boxes)
-            return
-        end
-    end
-    -- No usable sitelink: fall back to searching the QID's label context.
-    self:showSearchDialog("wikipedia", nil, word_boxes, book_lang)
-end
-
--- v1.3.0: generalized action=parse adapter for engines without TextExtracts
--- (Fandom, BWiki, Wiktionary). Two-phase to protect low-RAM devices: fetch
--- the intro first (section=0, tens of KB); auto-upgrade to the full page only
--- when the intro is too thin to be useful. Previously the Fandom full-page
--- parse shipped up to 1.5 MB of JSON through JSON.decode on every request.
-function DualWiki:fetchParseArticle(word, engine, sub)
-    local q = sanitizeQuery(word)
-    if q == "" then q = word end
-    local cfg = ENGINES[engine]
-    if not cfg then return nil end
-    local base = cfg.api(sub)
-        .. "?action=parse&page=" .. socket_url.escape(q)
-        .. "&prop=text&disablepp=1&format=json&formatversion=2"
-
-    local function fetchSection(section_suffix, timeout)
-        local url = base .. section_suffix
-        local ok, body = httpGet(url, timeout)
-        if not ok or not body then
-            self._last_error_kind = type(body) == "string" and body or "error"
-            return nil, true -- transport-level failure
-        end
-        local ok_json, data = pcall(JSON.decode, body)
-        if not ok_json or type(data) ~= "table" or not data.parse or type(data.parse.text) ~= "string" then
-            return nil, false -- structural: treat as empty, allow phase 2
-        end
-        local text = data.parse.text
-        if type(text) ~= "string" or #text == 0 then return nil, false end
-        return text, false
-    end
-
-    -- Phase 1: intro only. A transport failure short-circuits (no point
-    -- re-hitting a dead host with the full-page request).
-    local text, transport_failed = fetchSection("&section=0", MOEGIRL_TIMEOUT + 2)
-    if transport_failed then return nil end
-    if not text or #text < 300 then
-        -- Phase 2: intro missing or too thin (sections live in the body) —
-        -- pull the full page under the standard cap.
-        local full = fetchSection("", DIRECT_TIMEOUT)
-        if full then text = full end
-    end
-    if not text then return nil end
-    return { { title = q, extract = text, index = 1 } }
 end
 
 -- v1.2.1 (M1-A4): human-readable hint per transport error kind, so users can
@@ -2015,6 +1772,11 @@ local ERROR_HINTS = {
 --   5. generator=search full-text fallback
 --   6. surface whatever prefix noise we had
 function DualWiki:queryPipeline(word, engine, lang)
+    -- v1.3.5 (P3): every return now carries the EFFECTIVE language as a
+    -- third value. Stage 3/6 may recurse into another language internally;
+    -- the caller used to keep the requested lang and stamp it on the result
+    -- window title ("searched EN, title said ZH"). Tail calls propagate the
+    -- inner round's lang automatically.
     local q0 = sanitizeQuery(word)
     if q0 == "" then q0 = word end
     -- v1.3.3 (B7): selection script routing. A zh-defaulted book receiving a
@@ -2031,6 +1793,29 @@ function DualWiki:queryPipeline(word, engine, lang)
     end
     local plang = ENGINES[engine] and ENGINES[engine].particleLang(lang) or "zh"
     local q2 = stripTrailingParticle(q0, plang)
+    -- v1.3.5 (P4): "version tail" degradation. Selections like "DLSS 5",
+    -- "RTX 4090", "宝可梦 朱" are not article titles — the article lives at
+    -- the head word. Build a second query with the trailing number/edition
+    -- token dropped and try it AFTER the exact query misses (a real title
+    -- like "Final Fantasy VII" still wins Stage 1, so nothing regresses).
+    local q_number_stripped = nil
+    do
+        local head = q0:match("^(.-)%s+%d+[%d%.]*%s*$")
+        if head and utf8Len(head) >= 2 then
+            q_number_stripped = head
+        end
+    end
+    -- v1.3.5 (P4): space-delimited CJK particle ("DLSS 5 的", "シャナ な").
+    -- stripTrailingParticle only matches particles GLUED to the tail; the
+    -- spaced form survived every stage and dead-ended in the retry dialog.
+    local q_spaced_particle = nil
+    do
+        local head = q0:match("^(.-)%s+[" ..
+            table.concat(PARTICLES[plang] or PARTICLES.zh) .. "]%s*$")
+        if head and utf8Len(head) >= 2 then
+            q_spaced_particle = head
+        end
+    end
 
     -- Stage 1: merged prefixsearch probe (up to 4 ranked candidates).
     -- v1.2.1 (M1-A5): moegirl fast-fails at MOEGIRL_TIMEOUT; a transport-level
@@ -2044,32 +1829,8 @@ function DualWiki:queryPipeline(word, engine, lang)
         self._moegirl_unreachable = false
     end
 
-    -- Stage 1b (v1.3.2): elision competition BEFORE any good-hit verdict.
-    -- fr/it/pt selections with a leading elided article (l'équation →
-    -- équation) must challenge Stage 1's literal-prefix hits: on
-    -- fr.wikipedia, "l'équation" prefix-matches L'Équation de l'apocalypse
-    -- (a TV movie) and would win the verdict, burying the intended
-    -- Équation entry behind the elision strip. The bare-word probe runs
-    -- first here; an exact bare hit beats the elided-prefix noise.
-    -- v1.3.3 (A1): a winning disambiguation page is not a usable answer —
-    -- its value IS the item list. Every accepted return below funnels
-    -- through expandDisambiguation (graceful fallback to the raw set).
-    -- v1.3.3 (E3): the bare-word probe now competes for Romance elisions
-    -- AND German fusional contractions (de falls through from the elision
-    -- strip to the word-level fusion strip).
-    local q3 = stripLeadingElision(q0, plang)
-    if q3 == q0 then
-        q3 = stripLeadingFusion(q0, plang)
-    end
-    if q3 ~= q0 and not self._moegirl_unreachable then
-        local r3 = self:fetchCandidates(q3, engine, lang, "prefix")
-        if hasGoodHit(r3, q3, plang) then
-            return self:expandDisambiguation(r3, engine, lang), false
-        end
-    end
-
     if hasGoodHit(r1, q0, plang) then
-        return self:expandDisambiguation(r1, engine, lang), false
+        return self:expandDisambiguation(r1, engine, lang), false, lang
     end
 
     -- Stage 2: trailing-particle drop retry (量子力学的 → 量子力学,
@@ -2080,7 +1841,22 @@ function DualWiki:queryPipeline(word, engine, lang)
     if q2 ~= q0 and utf8Len(q2) >= 2 and not self._moegirl_unreachable then
         r2 = self:fetchCandidates(q2, engine, lang, "prefix")
         if hasGoodHit(r2, q2, plang) then
-            return self:expandDisambiguation(r2, engine, lang), false
+            return self:expandDisambiguation(r2, engine, lang), false, lang
+        end
+    end
+
+    -- Stage 2c (v1.3.5 P4): version-tail and spaced-particle degradation.
+    -- "DLSS 5" → probe "DLSS"; "DLSS 5 的" → probe "DLSS 5". Both fire only
+    -- after the exact query and the glued-particle strip missed, so real
+    -- titles containing numbers ("Final Fantasy VII", "娃娃 3") always win.
+    -- The hasGoodHit verdict on the STRIPPED query keeps noise out; the
+    -- original selection stays as the window word (what the user selected).
+    for _, alt in ipairs({ q_spaced_particle, q_number_stripped }) do
+        if alt and alt ~= q0 and alt ~= q2 and utf8Len(alt) >= 2 and not self._moegirl_unreachable then
+            local r_alt = self:fetchCandidates(alt, engine, lang, "prefix")
+            if hasGoodHit(r_alt, alt, plang) then
+                return self:expandDisambiguation(r_alt, engine, lang), false, lang
+            end
         end
     end
 
@@ -2095,7 +1871,7 @@ function DualWiki:queryPipeline(word, engine, lang)
     -- guard rejects moegirl's kana quirk (シャナの → Shanna).
     if r1 and r1[1] and #(r1[1].extract or "") >= 60
         and sharesPrefix(r1[1].title, q0, plang) then
-        return self:expandDisambiguation(r1, engine, lang), false
+        return self:expandDisambiguation(r1, engine, lang), false, lang
     end
 
     -- Stage 5: full-text search fallback (catches dab-page tops like
@@ -2106,7 +1882,7 @@ function DualWiki:queryPipeline(word, engine, lang)
         s = self:fetchCandidates(q0, engine, lang, "search")
     end
     if s and #s > 0 and sharesPrefixAny(s, q2 ~= q0 and q2 or q0, plang) then
-        return self:expandDisambiguation(s, engine, lang), false
+        return self:expandDisambiguation(s, engine, lang), false, lang
     end
 
     -- Stage 6 (cross-engine synergy): moegirl zero-hits or transport failures
@@ -2116,26 +1892,22 @@ function DualWiki:queryPipeline(word, engine, lang)
     if engine == "moegirl" then
         local fallback_lang = (lang == "ja") and "ja" or "zh"
         if lang == "ja" or self._moegirl_unreachable then
-            local fallback = self:queryPipeline(word, "wikipedia", fallback_lang)
+            local fallback, _, fallback_used_lang = self:queryPipeline(word, "wikipedia", fallback_lang)
             if fallback and #fallback > 0 then
-                return fallback, false
+                return fallback, false, fallback_used_lang or fallback_lang
             end
         end
     end
 
     -- Stage 7: surface whatever prefix noise we had (better than nothing).
-    -- v1.3.3 (E1): before surfacing a weak top, let sitelink counts promote
-    -- a clearly-notable entity past stub noise (never touches exact/dab).
     if r1 and #r1 > 0 then
-        r1 = self:notabilityReRank(r1, engine, lang)
-        return self:expandDisambiguation(r1, engine, lang), false
+        return self:expandDisambiguation(r1, engine, lang), false, lang
     end
     if r2 and #r2 > 0 then
-        r2 = self:notabilityReRank(r2, engine, lang)
-        return self:expandDisambiguation(r2, engine, lang), false
+        return self:expandDisambiguation(r2, engine, lang), false, lang
     end
 
-    return nil, false
+    return nil, false, lang
 end
 
 function DualWiki:lookup(word, engine, word_boxes, lang, want_full)
@@ -2175,11 +1947,30 @@ function DualWiki:lookup(word, engine, word_boxes, lang, want_full)
     -- v1.3.3 (E6): negative entries remember full-ladder misses (no zero
     -- transport involved) so re-selecting the same word skips the ladder;
     -- NEG_CACHE_TTL keeps the window short enough for wiki content to change.
+    local prompt_title = string.format("%s · %s", _("Querying"), cfg.label(lang))
+        .. LF .. word
     local cache_key = table.concat({ engine, lang or "", word }, "|")
     local cached = self._lookup_cache and self._lookup_cache[cache_key]
     if cached then
         if cached.cands then
-            self:showResult(word, cached.cands, engine, word_boxes, lang, cached.is_full)
+            -- v1.3.5 (P3): entries remember the language their content is
+            -- actually in (Stage 3/6 may have switched internally); the
+            -- window title follows it instead of the requested lang.
+            -- v1.3.5 (G2c): prewarm entries land UNEXPANDED (needs_expand);
+            -- the tap pays ONE top-candidate full fetch behind this message
+            -- instead of the highlight menu paying N fetches on the UI
+            -- thread.
+            local cands, is_full = cached.cands, cached.is_full
+            if cached.needs_expand and not cached.is_full then
+                local progress_info_cache = InfoMessage:new{ text = prompt_title, timeout = 15 }
+                UIManager:show(progress_info_cache)
+                cands, is_full = self:_expandAllFullText(cands, engine, cached.lang or lang)
+                UIManager:close(progress_info_cache)
+                if not self._last_error_kind then
+                    self:_storeCacheEntry(cache_key, cands, is_full, cached.lang or lang)
+                end
+            end
+            self:showResult(word, cands, engine, word_boxes, cached.lang or lang, is_full)
             return
         end
         if os.time() - (cached.at or 0) < NEG_CACHE_TTL then
@@ -2197,9 +1988,6 @@ function DualWiki:lookup(word, engine, word_boxes, lang, want_full)
         self._prewarm_scheduled = nil
     end
 
-    local prompt_title = string.format("%s · %s", _("Querying"), cfg.label(lang))
-        .. LF .. word
-
     local progress_info = InfoMessage:new{
         text = prompt_title,
         timeout = 15,
@@ -2215,30 +2003,47 @@ function DualWiki:lookup(word, engine, word_boxes, lang, want_full)
         end
         local ok, cands, is_full = pcall(function()
             if want_full then
-                if ENGINES[engine] and ENGINES[engine].fullTextViaParse then
-                    return self:fetchParseArticle(word, engine, self:_engineSub(engine, lang)), true
-                end
+                self._last_effective_lang = lang
                 return self:fetchDirect(word, engine, lang), true
             end
-            local result, full_flag = self:queryPipeline(word, engine, lang)
+            -- v1.3.5 (P3): queryPipeline returns (cands, is_full, effective_lang);
+            -- stash the language on self (pcall multiple-return plumbing).
+            local result, full_flag, used_lang = self:queryPipeline(word, engine, lang)
+            self._last_effective_lang = used_lang or lang
             return result, full_flag
         end)
 
         UIManager:close(progress_info)
 
         if ok and type(cands) == "table" and #cands > 0 then
+            -- v1.3.5 (P3): the language the CONTENT is in — Stage 3/6 may
+            -- have switched from the requested one; the title must follow.
+            local effective_lang = self._last_effective_lang or lang
+            self._last_effective_lang = nil
             -- v1.3.3 (E2): cross-language bridge for fresh article queries
             -- (cache hits replay the stored list, already bridged; full-text
             -- fetches skip bridging entirely).
+            -- v1.3.5 (G2): THEN expand every candidate to full article text
+            -- (lead length irrelevant) and mark the round full so the
+            -- pencil falls back to the edit dialog and the cache replays
+            -- the expanded list.
             if not want_full and not is_full then
-                cands = self:augmentLangLinks(cands, engine, lang)
+                if self:_langlinkEnabled() then
+                    cands = self:augmentLangLinks(cands, engine, effective_lang)
+                end
+                cands, is_full = self:_expandAllFullText(cands, engine, effective_lang)
             end
             -- v1.3.0: store in the session cache (capped at 32 entries,
             -- oldest-evicted; showResult only reads the stored table).
             -- v1.3.3 (E8): write goes through the shared helper so the
             -- highlight prewarm lands identical entries.
-            self:_storeCacheEntry(cache_key, cands, want_full or is_full)
-            self:showResult(word, cands, engine, word_boxes, lang, want_full or is_full)
+            -- v1.3.5 (P3): cache entries carry their effective language.
+            -- v1.3.5 (G2): a mid-expansion transport failure leaves
+            -- _last_error_kind set — E6 contract, never cache that round.
+            if not self._last_error_kind then
+                self:_storeCacheEntry(cache_key, cands, want_full or is_full, effective_lang)
+            end
+            self:showResult(word, cands, engine, word_boxes, effective_lang, want_full or is_full)
         else
             -- v1.3.3 (E6): remember a clean (non-transport) miss so repeated
             -- selections of the same word skip the ladder. Transport errors
@@ -2246,38 +2051,52 @@ function DualWiki:lookup(word, engine, word_boxes, lang, want_full)
             if ok and not self._last_error_kind then
                 self:_storeMissEntry(cache_key)
             end
-            self:showRetryDialog(word, engine, word_boxes, lang)
+            -- v1.3.5 (P3): consume the stashed effective language on the
+            -- miss path too, so the retry dialog reports the language the
+            -- ladder actually probed (and never leaks it to a later round).
+            local miss_lang = self._last_effective_lang or lang
+            self._last_effective_lang = nil
+            self:showRetryDialog(word, engine, word_boxes, miss_lang)
         end
     end)
 end
 
-function DualWiki:showResult(word, cands, engine, word_boxes, lang, is_full)
+function DualWiki:showResult(word, cands, engine, word_boxes, lang, is_full, force_fullpage)
     local self_ref = self
     local cfg = ENGINES[engine]
     if not cfg then return end
     local dict_name = cfg.label(lang)
-    -- DictQuickLookup consumes `lang` per result for font shaping; Fandom's
-    -- community subdomain is not a language code, so map it to en.
-    local result_lang = (engine == "fandom") and "en" or (lang or "zh")
+    local result_lang = lang or "zh"
+    -- v1.3.5 (F1/F1b): immersive large-window reading, a
+    -- first-class Dual Wiki feature now that G2 already carries full
+    -- article text. wikipedia AND moegirl qualify. The fullpage window's
+    -- fixed [Save as EPUB][Close] layout calls core
+    -- Wikipedia:createEpubWithUI with the window's lang — a real-wiki
+    -- language requirement — so moegirl fullpage windows strip the Save
+    -- button at layout build (_patchFullpageLayout) rather than losing
+    -- fullscreen reading entirely.
+    -- An explicit langlink pseudo-candidate is excluded: its pencil loads
+    -- the real article; the stub here has nothing worth archiving.
+    local allow_fullpage = engine == "wikipedia" or engine == "moegirl"
+    local auto_fullpage = allow_fullpage and G_reader_settings ~= nil
+        and G_reader_settings:isTrue("dualwiki_fullpage")
+    self._last_fullpage = (force_fullpage or auto_fullpage) and allow_fullpage or false
 
     self._last_candidate_titles = {}
-    self._last_candidate_qids = {}
     self._last_langlink = {}
     self._last_was_full = is_full and true or false
 
     local results = {}
     for i, cand in ipairs(cands) do
         self._last_candidate_titles[cand.title] = true
-        if type(cand.qid) == "string" then
-            self._last_candidate_qids[cand.title] = cand.qid
-        end
         local definition
         if cand.extract and #cand.extract > 0 then
             definition = cleanWikiExtract(cand.extract)
         else
-            -- v1.3.2: clearer wording — the pencil is a tap, not a hold,
-            -- and "top right" pins its location (user-acceptance finding).
-            definition = _("Candidate match. Tap the pencil icon at the top right to load the full article.")
+            -- G2: windows carry full text whenever the article has one; this
+            -- bare label only remains for title-only engines' misses and
+            -- pages whose full fetch structurally failed.
+            definition = _("Candidate match.")
         end
         -- v1.3.3 (A1): dab-expansion entries are one of several senses;
         -- tag the definition line so the reader knows they are browsing an
@@ -2308,6 +2127,11 @@ function DualWiki:showResult(word, cands, engine, word_boxes, lang, is_full)
             lang = cand_lang,
             rtl_lang = false,
         }
+        if self._last_fullpage and not cand.dab and not cand.dab_item
+            and not cand.langlink_lang
+            and cand.extract and #cand.extract > 0 then
+            results[i].is_wiki_fullpage = true
+        end
     end
 
     local window
@@ -2318,6 +2142,9 @@ function DualWiki:showResult(word, cands, engine, word_boxes, lang, is_full)
         word = word,
         word_boxes = word_boxes,
         results = results,
+        -- v1.3.5 (P1 step 2): lets the in-window short-hold re-selection
+        -- route back into OUR search dialog with the right engine.
+        dualwiki_engine = engine,
         -- Verified by Codex: is_wiki=false decouples from core ReaderWikipedia private methods
         is_wiki = false,
         -- Pencil icon routes through the native DictQuickLookup:onLookupInputWord()
@@ -2327,9 +2154,12 @@ function DualWiki:showResult(word, cands, engine, word_boxes, lang, is_full)
         -- table, so only forward real strings.
         -- Single tap prefills the original selection; long-press prefills the
         -- currently viewed candidate (self.lookupword updates on switch).
-        -- v1.3.3 (E2/E4): when the viewed candidate is a cross-language
-        -- pseudo-entry or Wikidata item, the pencil loads its full article
-        -- directly in the target language instead of reopening search.
+        -- v1.3.3 (E2): when the viewed candidate is a cross-language
+        -- pseudo-entry, the pencil loads its full article directly in the
+        -- target language instead of reopening search.
+        -- v1.3.5 (G2, user direction): otherwise the pencil keeps its
+        -- ORIGINAL core role — edit the queried word (search dialog). The
+        -- always-full display left it nothing to expand.
         onLookupInputWord = function(dlg, hint, ev)
             if type(hint) ~= "string" then
                 hint = nil
@@ -2340,15 +2170,123 @@ function DualWiki:showResult(word, cands, engine, word_boxes, lang, is_full)
                 self_ref:fetchDirectAndShow(viewed, "wikipedia", link_lang, word_boxes)
                 return
             end
-            local qid = self_ref._last_candidate_qids and self_ref._last_candidate_qids[viewed]
-            if qid then
-                self_ref:fetchWikidataFullAndShow(qid, word_boxes)
-                return
-            end
             self_ref:showSearchDialog(engine, viewed, word_boxes, lang)
         end,
     }
     UIManager:show(window)
+end
+
+-- v1.3.5 (F1/F1b): immersive reading — re-show the currently
+-- viewed article in a fullpage window (width = screen minus margins; the
+-- button bar is [Save as EPUB][Close] for wikipedia, [Close]-only for
+-- moegirl via _patchFullpageLayout). The definition is ALREADY full text
+-- (G2), so no network round is needed: the exact-title extract is replayed
+-- from the session cache (engine-matched); a cache miss falls back to one
+-- fetchDirect round. Always shows a SINGLE-candidate window for the viewed
+-- title (never re-opens on the list's top entry).
+function DualWiki:showFullpageResult(title, definition, engine, lang, word_boxes)
+    if not title or title == "" then return end
+    local extract = definition
+    local cached = self:_cachedFullpageCandidates(title, engine)
+    if cached then
+        for _, c in ipairs(cached) do
+            if c.title == title and c.extract and #c.extract > 0 then
+                extract = c.extract
+                break
+            end
+        end
+    end
+    if not extract or extract == "" then
+        local fresh = self:fetchDirect(title, engine, lang)
+        if fresh and fresh[1] and fresh[1].extract then
+            extract = fresh[1].extract
+        else
+            self:showRetryDialog(title, engine, word_boxes, lang)
+            return
+        end
+    end
+    self:showResult(title, { { title = title, extract = extract } },
+        engine, word_boxes, lang, true, true)
+end
+
+-- v1.3.5 (F1/F1b): exact-title replay from the session cache so
+-- toggling fullpage never re-downloads an article already expanded by G2.
+-- Returns the candidate LIST (showFullpageResult picks the viewed title's
+-- entry). Entries are matched by ENGINE (cache keys are engine|lang|word):
+-- a moegirl fullpage must never replay a wikipedia round — the same title
+-- (初音未来) lives on both sites with different content. Prefers an
+-- already-EXPANDED entry (is_full, not needs_expand — the probe-only
+-- prewarm entry carries just the lead summary).
+function DualWiki:_cachedFullpageCandidates(title, engine)
+    if not self._lookup_cache then return nil end
+    local fallback = nil
+    for key, entry in pairs(self._lookup_cache) do
+        local key_engine = key:match("^([^|]+)|")
+        if key_engine == engine then
+            local cands = entry.cands
+            if type(cands) == "table" then
+                for _, c in ipairs(cands) do
+                    if c.title == title and c.extract and #c.extract > 0 then
+                        if not entry.needs_expand or entry.is_full then
+                            return cands
+                        end
+                        fallback = fallback or cands
+                    end
+                end
+            end
+        end
+    end
+    return fallback
+end
+
+-- v1.3.5 (F1b): moegirl fullpage safety. Core's fullpage layout is fixed
+-- [Save as EPUB][Close]; the Save button calls Wikipedia:createEpubWithUI
+-- with the window's lang, which for moegirl would fetch from
+-- {lang}.wikipedia.org — the wrong site. Strip the save button from moegirl
+-- fullpage windows (keep [Close]) so immersive reading survives without a
+-- misleading archive action. Pure function so tests pin the layout contract.
+function DualWiki:_stripSaveFromFullpageLayout(layout)
+    if type(layout) ~= "table" then return layout end
+    for r = #layout, 1, -1 do
+        local row = layout[r]
+        if type(row) == "table" then
+            for b = #row, 1, -1 do
+                local btn = row[b]
+                if type(btn) == "table" and btn.id == "save" then
+                    table.remove(row, b)
+                end
+            end
+            if #row == 0 then table.remove(layout, r) end
+        end
+    end
+    return layout
+end
+
+-- v1.3.5 (F1b): class-level hook into the fullpage button-layout build.
+-- Only touches Dual Wiki moegirl fullpage windows; wikipedia and native
+-- windows keep core's exact [Save as EPUB][Close] bar.
+function DualWiki:_patchFullpageLayout()
+    if DictQuickLookup._dualwiki_fullpage_layout_patched then return end
+    DictQuickLookup._dualwiki_fullpage_layout_patched = true
+    local orig_bbl = DictQuickLookup.buildButtonLayout
+    DictQuickLookup.buildButtonLayout = function(dql_self)
+        local layout = orig_bbl and orig_bbl(dql_self) or nil
+        local dw = dql_self.ui and dql_self.ui.dual_wiki
+        if layout and dw and dw._stripSaveFromFullpageLayout
+            and dql_self.dualwiki_engine == "moegirl"
+            and dql_self.is_wiki_fullpage then
+            layout = dw:_stripSaveFromFullpageLayout(layout)
+        end
+        return layout
+    end
+end
+
+-- v1.3.5 (F2): native-takeover gate, default ON. When OFF, Dual Wiki
+-- completely steps aside: core ReaderWikipedia keeps its menu entries, its
+-- highlight button (auto-replaced "Wikipedia"/"Full article"), and the
+-- native fullscreen + Save-as-EPUB channel.
+function DualWiki:_takeoverEnabled()
+    return G_reader_settings == nil or not G_reader_settings:isTrue("dualwiki_no_takeover")
 end
 
 -- v1.3.3 (A3): a one-tap button that re-queries the spelling suggestion
@@ -2373,10 +2311,8 @@ function DualWiki:showRetryDialog(failed_word, engine, word_boxes, lang)
     local target = cfg.switchTarget and cfg.switchTarget()
     local target_cfg = target and ENGINES[target]
     -- v1.2.2 fix: normalize the language for BOTH the switch button label and
-    -- the actual re-lookup. Previously the label used a ja/en/zh-normalized
-    -- value while the lookup call passed the raw lang through — a Fandom
-    -- failure switching to Wikipedia sent "starwars" as a language and
-    -- queried the nonexistent starwars.wikipedia.org.
+    -- the actual re-lookup, so the label and the query never disagree about
+    -- which wiki serves the retry.
     local switch_lang = (lang == "ja" or lang == "en") and lang or "zh"
     local switch_btn_text = target_cfg and string.format("%s → %s", _("Switch to"), target_cfg.label(
         switch_lang

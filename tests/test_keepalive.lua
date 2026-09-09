@@ -87,16 +87,17 @@ do
     check("K32 exactly-at-boundary ok", r3.add(string.rep("x", 1024 * 1024)), true)
 end
 
-print("== is_trusted_host whitelist (v1.3.3 hardening) ==")
+print("== is_trusted_host whitelist (v1.3.3 hardening, slim build) ==")
 do
     -- Every host the plugin's ENGINES table can produce must pass…
     check("K33 en.wikipedia.org", M.is_trusted_host("en.wikipedia.org"), true)
     check("K34 zh.wikipedia.org", M.is_trusted_host("zh.wikipedia.org"), true)
-    check("K35 en.wiktionary.org", M.is_trusted_host("en.wiktionary.org"), true)
-    check("K36 www.wikidata.org", M.is_trusted_host("www.wikidata.org"), true)
     check("K37 zh.moegirl.org.cn", M.is_trusted_host("zh.moegirl.org.cn"), true)
-    check("K38 starwars.fandom.com", M.is_trusted_host("starwars.fandom.com"), true)
-    check("K39 wiki.biligame.com", M.is_trusted_host("wiki.biligame.com"), true)
+    -- Slim build: removed engines' hosts must now be OFF the whitelist…
+    check("K35 en.wiktionary.org (removed)", M.is_trusted_host("en.wiktionary.org"), false)
+    check("K36 www.wikidata.org (removed)", M.is_trusted_host("www.wikidata.org"), false)
+    check("K38 starwars.fandom.com (removed)", M.is_trusted_host("starwars.fandom.com"), false)
+    check("K39 wiki.biligame.com (removed)", M.is_trusted_host("wiki.biligame.com"), false)
     -- …suffix impostors and foreign hosts must NOT (the custom HTTP reader
     -- is only regression-tested against MediaWiki; anything else must fall
     -- back to the legacy ssl.https transport).

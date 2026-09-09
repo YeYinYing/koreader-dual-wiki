@@ -23,8 +23,6 @@ local chunk = assert(loadchunk(helpers .. [[
 return {
     sanitizeQuery = sanitizeQuery,
     stripTrailingParticle = stripTrailingParticle,
-    stripLeadingElision = stripLeadingElision,
-    stripLeadingFusion = stripLeadingFusion,
     hasGoodHit = hasGoodHit,
     sharesPrefix = sharesPrefix,
     caseFold = caseFold,
@@ -114,22 +112,8 @@ check("V6 zh (无区码) → zh-cn 兜底", api.zhVariantOf("zh"), "zh-cn")
 check("V7 nil → zh-cn 兜底", api.zhVariantOf(nil), "zh-cn")
 check("V8 非zh串 → zh-cn 兜底", api.zhVariantOf("en-US"), "zh-cn")
 
-print("== v1.3.2 stripLeadingElision (fr/it/pt 省音回退) ==")
-check("E1 ASCII l'", api.stripLeadingElision("l'amour", "fr"), "amour")
-check("E2 弯引号 l’", api.stripLeadingElision("l\226\128\153amour", "fr"), "amour")
-check("E3 qu' 最长匹配不被 qu' 截胡", api.stripLeadingElision("qu'il", "fr"), "il")
-check("E4 jusqu' 长表项优先，剩余1字不剥", api.stripLeadingElision("jusqu\226\128\153\195\160", "fr"), "jusqu\226\128\153\195\160")
-check("E5 d'or 剩余2字可剥", api.stripLeadingElision("d'or", "fr"), "or")
-check("E6 无省音原样", api.stripLeadingElision("amour", "fr"), "amour")
-check("E7 en 不适用", api.stripLeadingElision("o'clock", "en"), "o'clock")
-check("E8 it un'", api.stripLeadingElision("un'ora", "it"), "ora")
-check("E9 过短查询不剥", api.stripLeadingElision("l'a", "fr"), "l'a")
-check("E3b it dell'arte", api.stripLeadingElision("dell'arte", "it"), "arte")
-check("E3c it dell' 优先于 d'", api.stripLeadingElision("dell'arte", "it"), "arte")
-check("E3d it sull'isola", api.stripLeadingElision("sull'isola", "it"), "isola")
-check("E3e fr d' 不吞 dell", api.stripLeadingElision("d'hier", "fr"), "hier")
-check("E10 剩余不足2字回退", api.stripLeadingElision("d'\195\160", "fr"), "d'\195\160")
-check("E11 句首大写 L'Arc 照剥", api.stripLeadingElision("L'Arc", "fr"), "Arc")
+-- Slim build: elision (l'amour→amour) and German fusion strips were removed
+-- by user direction — the selection is searched as the user wrote it.
 
 print("== v1.3.2 caseFold (Lua :lower 漏掉的非 ASCII 大写) ==")
 check("C1 É→é", api.caseFold("\195\137"), "\195\169")
@@ -154,17 +138,13 @@ check("A4 parseCandidatePages exact 重音折叠", (function()
 end)(), "Équation")
 
 print("== v1.3.2 省音与助词叠加 ==")
-check("E12 叠拆：l'équation的 → équation", api.stripTrailingParticle(api.stripLeadingElision("l'équation的", "fr"), "zh"), "équation")
+check("E12 叠拆：l'équation的 → l'équation (省音已移除)", api.stripTrailingParticle("l'équation的", "zh"), "l'équation")
 
-print("== v1.3.3 B5 phrase particles (fr/es/it/de) ==")
+print("== Slim build: phrase particles removed (选什么搜什么) ==")
 check("P1 fr de Gaulle 不剥", api.stripTrailingParticle("de Gaulle", "fr"), "de Gaulle")
-check("P2 fr L'histoire de → L'histoire", api.stripTrailingParticle("L'histoire de", "fr"), "L'histoire")
-check("P3 fr 大写 DE 照剥", api.stripTrailingParticle("Histoire DE", "fr"), "Histoire")
-check("P4 es historia del → historia", api.stripTrailingParticle("historia del", "es"), "historia")
-check("P5 it della 按词剥", api.stripTrailingParticle("Guerra della", "it"), "Guerra")
-check("P6 de theorie der → theorie", api.stripTrailingParticle("Theorie der", "de"), "Theorie")
-check("P7 fr Rome 不剥", api.stripTrailingParticle("histoire de Rome", "fr"), "histoire de Rome")
-check("P8 剩余不足2字不剥", api.stripTrailingParticle("à de", "fr"), "à de")
+check("P2 fr L'histoire de 原样", api.stripTrailingParticle("L'histoire de", "fr"), "L'histoire de")
+check("P3 es historia del 原样", api.stripTrailingParticle("historia del", "es"), "historia del")
+check("P4 de Theorie der 原样", api.stripTrailingParticle("Theorie der", "de"), "Theorie der")
 
 print("== v1.3.3 B7 routeLangForScript (选区脚本自检) ==")
 check("R1 纯拉丁→en", api.routeLangForScript("Quantum mechanics"), "en")
@@ -179,24 +159,16 @@ check("R8 过短→nil", api.routeLangForScript("A"), nil)
 print("== v1.3.3 A1 parseCandidatePages dab flag ==")
 do
     local dab = api.parseCandidatePages({ query = { pages = {
-        { title = "Mercury", ns = 0, index = 1, pageprops = { disambiguation = "", wikibase_item = "Q12345" } },
+        { title = "Mercury", ns = 0, index = 1, pageprops = { disambiguation = "" } },
         { title = "Mercury (planet)", ns = 0, index = 2 },
     } } }, "Mercury")
     check("D1 dab 标记", dab and dab[1] and dab[1].dab, true)
     check("D2 exact 仍居首", dab and dab[1] and dab[1].title, "Mercury")
     check("D3 非 dab 无标记", dab and dab[2] and dab[2].dab, nil)
-    check("D4 qid 透传", dab and dab[1] and dab[1].qid, "Q12345")
 end
 
-print("== v1.3.3 E3 German fusional contractions (词级前导缩合) ==")
-check("F1 zum Beispiel → Beispiel", api.stripLeadingFusion("zum Beispiel", "de"), "Beispiel")
-check("F2 zur Sache → Sache", api.stripLeadingFusion("zur Sache", "de"), "Sache")
-check("F3 vom Winde → Winde", api.stripLeadingFusion("vom Winde", "de"), "Winde")
-check("F4 Immer 不误伤", api.stripLeadingFusion("Immer wieder", "de"), "Immer wieder")
-check("F5 Amsel 不误伤", api.stripLeadingFusion("Amsel", "de"), "Amsel")
-check("F6 非 de 不剥", api.stripLeadingFusion("zum Beispiel", "fr"), "zum Beispiel")
-check("F7 大写匹配", api.stripLeadingFusion("Zum Beispiel", "de"), "Beispiel")
-check("F8 过短不剥", api.stripLeadingFusion("im A", "de"), "im A")
+print("== Slim build: German fusion removed (选什么搜什么) ==")
+check("F1 zum Beispiel 原样", api.stripTrailingParticle("zum Beispiel", "de"), "zum Beispiel")
 
 print("== Phase 1 mishit guards ==")
 check("M1 (G)I-DLE 括号不动", api.sanitizeQuery("(G)I-DLE"), "(G)I-DLE")

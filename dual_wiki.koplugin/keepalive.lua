@@ -48,17 +48,10 @@ M.available = ok_socket and ok_ssl and ok_url
 -- sees a host it was not built for.
 local TRUSTED_HOST_SUFFIXES = {
     ".wikipedia.org",
-    ".wiktionary.org",
-    ".wikidata.org",
     ".moegirl.org.cn",
-    ".fandom.com",
-}
-local TRUSTED_HOSTS = {
-    ["wiki.biligame.com"] = true,
 }
 function M.is_trusted_host(host)
     if type(host) ~= "string" or host == "" then return false end
-    if TRUSTED_HOSTS[host] then return true end
     for _, suffix in ipairs(TRUSTED_HOST_SUFFIXES) do
         if host:sub(-#suffix) == suffix then return true end
     end

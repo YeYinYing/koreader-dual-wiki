@@ -10,7 +10,7 @@
 
 </div>
 
-KOReader 电子墨水屏阅读器的百科查询插件，支持维基百科（`zh` / `en` / `ja`）、萌娘百科与 Fandom。
+KOReader 电子墨水屏阅读器的百科查询插件，支持维基百科（`zh` / `en` / `ja`，另有 `de` / `fr` / `es` / `ru` 按书籍语种自动提供）与萌娘百科。
 
 ## 功能
 
@@ -19,10 +19,11 @@ KOReader 电子墨水屏阅读器的百科查询插件，支持维基百科（`z
 - 语言感知的末尾助词处理；英文仅剥离所有格 `'s`，不处理复数 `s`。
 - 拉丁字母查询使用词边界匹配（`quantum` 可命中 `Quantum mechanics`，`wo` 不会误命中 `Wookieepedia`）。
 - 主路径单次请求返回带摘要的候选词条；铅笔操作可升级为完整正文。
-- 根据 KOReader 书籍元数据自动路由语种，也可在设置中手动覆盖。
+- 根据 KOReader 书籍元数据自动路由语种，也可在设置中手动覆盖；`de` / `fr` / `es` / `ru` 仅在对应语种的书籍中自动出现。
 - 日文查询在萌娘百科结果不可靠时自动回退 `ja.wikipedia`。
 - `converttitles=1` 仅用于维基百科中文查询。
-- Fandom 完整正文通过 `action=parse` 获取。
+- 可选项默认关闭，藏于设置中：高亮预热查询（连查更快）、跨语言联想、结果默认全屏打开（`全文阅读` 按钮 + `dualwiki_fullpage`，维基百科与萌娘百科都支持——萌娘全屏窗不含 `存为 EPUB` 按钮，该路径仅限真维基）。
+- `接管原生 Wikipedia 按钮与菜单` 开关（默认开启）。关闭后还原 KOReader 原生维基菜单入口及其自带的全屏 + 存 EPUB 通道。
 - 内置 `zh_CN`、`zh_TW`、`ja` gettext 本地化，启动时按当前界面语言加载。
 - 响应体上限 2 MB；请求结束后显式重置超时；已对过期 UI 回调做保护。
 
@@ -38,9 +39,11 @@ koreader/
         ├── main.lua
         └── locale/
             ├── messages.pot
+            ├── en.po
             ├── ja.po
             ├── zh_CN.po
             ├── zh_TW.po
+            ├── en/LC_MESSAGES/dual_wiki.mo
             ├── ja/LC_MESSAGES/dual_wiki.mo
             ├── zh_CN/LC_MESSAGES/dual_wiki.mo
             └── zh_TW/LC_MESSAGES/dual_wiki.mo

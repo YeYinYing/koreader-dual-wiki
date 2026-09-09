@@ -2,11 +2,9 @@
 -- REAL network. Covers what the pure-function unit tests cannot:
 --   * https dispatch (ssl.https vs socket.http) per URL scheme
 --   * real MediaWiki JSON shapes for every engine (wikipedia zh/en/ja/
---     de/fr/es/ru, moegirl, fandom, bwiki, wiktionary)
+--     de/fr/es/ru, moegirl)
 --   * queryPipeline stage ladder end-to-end (particle retry, prefix
 --     guard, full-text search fallback, moegirl-unreachable degradation)
---   * the v1.3.0 parse-engine two-phase fetch (section=0 first) and its
---     transport-failure short-circuit
 --
 -- Stubbed: UIManager and all widget classes (no rendering), NetworkMgr
 -- (assume online). Everything below the UI surface is the real plugin code.
@@ -250,24 +248,35 @@ assertPipeline("fr (philosophie)", "philosophie", "wikipedia", "fr", nil)
 assertPipeline("es (historia de Roma)", "historia de Roma", "wikipedia", "es", nil)
 assertPipeline("ru cyrillic (Квантовая механика)", "Квантовая механика", "wikipedia", "ru", nil)
 
--- v1.3.2 regression (user-acceptance): sentence-initial capital "L'équation"
--- must resolve to the math article Équation, NOT the L'Équation* works
--- (TV movie / Bogdanoff essay / Khadra novel) that literal prefixsearch
--- returns. The check is exact-title, NOT substring: "L'Équation de
--- l'apocalypse" contains "quation" and would silently pass a find() assert
--- (this is exactly how the bug escaped CI twice).
-assertPipeline("fr capital elision (L'équation→Équation)", "L'équation", "wikipedia", "fr", nil,
-    function(title) return title == "Équation" end)
-assertPipeline("fr lower elision (l'équation→Équation)", "l'équation", "wikipedia", "fr", nil,
-    function(title) return title == "Équation" end)
+-- Slim build (user direction): the elision strip was REMOVED — the selection
+-- is searched exactly as written ("选什么搜什么"). Pin the literal contract:
+-- "L'équation" prefix-matches the L'Équation* works, and that is now the
+-- DESIRED outcome, not a bug. Exact-title check keeps the assert honest.
+assertPipeline("fr literal search (L'équation)", "L'équation", "wikipedia", "fr", nil,
+    function(title) return title == "L'Équation de l'apocalypse" end)
+assertPipeline("fr literal search (l'équation)", "l'équation", "wikipedia", "fr", nil,
+    function(title) return title == "L'Équation de l'apocalypse" end)
 
 print("== v1.3.3 search quality (real network) ==")
 -- A1: en.wikipedia "Mercury" is a Disambiguator-flagged page whose extract
 -- is a bare item index; the pipeline must swap it for the dab items (in
 -- document order, batched intro extracts) instead of surfacing the index.
+-- Bounded retry: the expansion's action=parse wikitext request is the
+-- suite's most rate-limit-prone call (429 degrades the expansion by
+-- design — top stays the raw page); same contract as the B7 case.
 do
-    throttle()
-    local cands = retry429(function() return dw:queryPipeline("Mercury", "wikipedia", "en") end)
+    local cands
+    for attempt_dab = 1, 3 do
+        throttle()
+        cands = retry429(function() return dw:queryPipeline("Mercury", "wikipedia", "en") end)
+        local n = type(cands) == "table" and #cands or 0
+        local top = n > 0 and tostring(cands[1].title) or "?"
+        if n >= 2 and top ~= "Mercury" and cands[1].dab_item then break end
+        if attempt_dab < 3 then
+            print("  .. en dab expansion degraded (attempt " .. attempt_dab .. "/3), backing off 10 s ..")
+            socket.sleep(10)
+        end
+    end
     local n = type(cands) == "table" and #cands or 0
     local top = n > 0 and tostring(cands[1].title) or "?"
     if n >= 2 and top ~= "Mercury" and cands[1].dab_item then
@@ -317,46 +326,99 @@ do
     end
 end
 
-print("== parse engine two-phase fetch (section=0 first) ==")
+-- v1.3.5 (G2c): always-full display — top candidate expanded behind the — result windows never show lead-section
+-- summaries. Part (a) pins the contract with a stubbed transport; part (b)
+-- proves it live on the page that motivated the change.
+print("== G2c always-full expansion (top-candidate) (stubbed transport, then live) ==")
 do
-    throttle()
-    local cands = retry429(function() return dw:fetchParseArticle("Darth Vader", "fandom", "starwars") end)
-    local extract = cands and cands[1] and cands[1].extract or ""
-    if #extract < 100 then
-        fail("fandom parse (Darth Vader)", "extract too short: " .. #extract)
-    else
-        pass("fandom parse (Darth Vader) -> " .. #extract .. " bytes")
+    local saved_fd = dw.fetchDirect
+    local calls = {}
+    dw.fetchDirect = function(self, title, eng, lng)
+        calls[#calls + 1] = { title = title, engine = eng, lang = lng }
+        return { { title = title, extract = "FULL<" .. tostring(title) .. ">", index = 1 } }
     end
-end
-do
-    throttle()
-    local cands = retry429(function() return dw:fetchParseArticle("蒙德", "bwiki", "ys") end)
-    local extract = cands and cands[1] and cands[1].extract or ""
-    if #extract < 30 then
-        fail("bwiki parse (蒙德 @ ys)", "extract too short: " .. #extract)
+    -- (a1) multi-candidate: ONLY the top entry expanded (G2c — one heavy
+    -- fetch per window, not N), metadata preserved, second candidate intact
+    local multi = {
+        { title = "甲", extract = "lead-甲", exact = true },
+        { title = "乙", extract = "", exact = false, dab_item = true, index = 2 },
+    }
+    local out, full = dw:_expandAllFullText(multi, "moegirl", "zh")
+    if full and out[1].extract == "FULL<甲>" and out[1].exact == true
+        and out[2].extract == "" and out[2].dab_item and out[2].index == 2 then
+        pass("G2c stub: top candidate expanded, rest untouched, metadata kept")
     else
-        pass("bwiki parse (蒙德 @ ys) -> " .. #extract .. " bytes")
+        fail("G2c stub: multi-candidate", "full=" .. tostring(full))
     end
-end
-do
-    throttle()
-    local cands = retry429(function() return dw:fetchParseArticle("quantum", "wiktionary", "en") end)
-    if type(cands) ~= "table" or not cands[1] or #(cands[1].extract or "") < 30 then
-        fail("wiktionary parse (quantum)", "no usable extract")
+    -- (a2) E2 pseudo-entry expands from the TARGET language's wikipedia
+    local pseudo = { { title = "Target", extract = "", langlink_lang = "en", langlink_from = "源" } }
+    dw:_expandAllFullText(pseudo, "wikipedia", "zh")
+    local last = calls[#calls]
+    if last and last.title == "Target" and last.engine == "wikipedia" and last.lang == "en" then
+        pass("G2c stub: langlink pseudo expands via target language")
     else
-        pass("wiktionary parse (quantum) -> " .. #cands[1].extract .. " bytes")
+        fail("G2c stub: langlink pseudo", last and (last.engine .. "/" .. tostring(last.lang)) or "no call")
+    end
+    -- (a3) Slim build: parse engines removed — every engine routes through
+    -- fetchDirect. Removed engines are no longer routable by design.
+    -- Pin the wikipedia path instead.
+    local ponly = { { title = "Vader", extract = "" } }
+    dw:_expandAllFullText(ponly, "wikipedia", "en")
+    last = calls[#calls]
+    if last and last.title == "Vader" and last.engine == "wikipedia" and last.lang == "en" then
+        pass("G2c stub: full fetch routes via fetchDirect (parse engines removed)")
+    else
+        fail("G2c stub: fetchDirect routing", last and (last.engine .. "/" .. tostring(last.lang)) or "no call")
+    end
+    -- (a4) transport failure on the top fetch: lead kept, kind set (E6 —
+    -- never cache a transport-failed round), no crash
+    dw.fetchDirect = function(self)
+        self._last_error_kind = "timeout"
+        return nil
+    end
+    dw._last_error_kind = nil
+    local mixed = { { title = "A", extract = "leadA" }, { title = "B", extract = "leadB" } }
+    local out2, full2 = dw:_expandAllFullText(mixed, "moegirl", "zh")
+    if full2 and out2[1].extract == "leadA" and dw._last_error_kind == "timeout" then
+        pass("G2c stub: top transport failure keeps lead, kind set (E6)")
+    else
+        fail("G2c stub: transport short-circuit", "kind=" .. tostring(dw._last_error_kind))
+    end
+    dw._last_error_kind = nil
+    dw.fetchDirect = saved_fd
+    -- (b) live: the 30-char-lead page AND a long-lead page both come back
+    -- full — lead length must not matter (G1's thin-only rule is gone).
+    throttle()
+    local c1 = retry429(function() return dw:fetchCandidates("黑桐干也", "moegirl", "zh", "prefix") end)
+    if type(c1) == "table" and #c1 > 0 then
+        local e1, f1 = dw:_expandAllFullText(c1, "moegirl", "zh")
+        local len1 = e1 and e1[1] and #tostring(e1[1].extract or "") or 0
+        if f1 and len1 > 1000 then
+            pass("G2c live: 黑桐干也 lead(30) -> full article (" .. len1 .. " chars)")
+        else
+            fail("G2c live: 黑桐干也", "len=" .. len1 .. " full=" .. tostring(f1))
+        end
+    else
+        fail("G2c live: 黑桐干也", "probe returned no candidates")
+    end
+    throttle()
+    local c2 = retry429(function() return dw:fetchCandidates("初音未来", "moegirl", "zh", "prefix") end)
+    if type(c2) == "table" and #c2 > 0 then
+        local lead2 = #tostring(c2[1].extract or "") -- BEFORE mutation: _expandAllFullText replaces entries in place
+        local e2, f2 = dw:_expandAllFullText(c2, "moegirl", "zh")
+        local len2 = e2 and e2[1] and #tostring(e2[1].extract or "") or 0
+        if f2 and len2 > lead2 and len2 > 800 then
+            pass("G2c live: 初音未来 lead(" .. lead2 .. ") expanded to full article (" .. len2 .. " chars)")
+        else
+            fail("G2c live: 初音未来", "lead=" .. lead2 .. " len=" .. len2 .. " full=" .. tostring(f2))
+        end
+    else
+        fail("G2c live: 初音未来", "probe returned no candidates")
     end
 end
 
-print("== transport failure short-circuit (bad fandom sub) ==")
-do
-    local cands = dw:fetchParseArticle("Anything", "fandom", "no-such-community-xyz")
-    if cands ~= nil then
-        fail("unreachable fandom sub returns nil", tostring(cands))
-    else
-        pass("unreachable fandom sub -> nil (transport error consumed)")
-    end
-end
+-- Slim build: the parse-engine two-phase fetch and the three parse engines
+-- were removed by user direction. The live parse cases no longer apply.
 
 print("== prefixsearch candidate shape (titles + optional extracts) ==")
 do
@@ -426,6 +488,178 @@ do
         fail("dab items tagged with Disambiguation entry",
             "tagged=" .. tagged .. " all_tagged=" .. tostring(all_tagged))
     end
+    -- v1.3.5 (F1): fullpage flag contract. Default OFF: wikipedia results
+    -- carry NO is_wiki_fullpage. With the opt-in set, plain wikipedia
+    -- results carry it; moegirl results NEVER do (the fullpage button bar's
+    -- Save-as-EPUB is a real-wiki-language contract); dab/langlink stub
+    -- entries are excluded too.
+    local function clear_fullpage()
+        if G_reader_settings:readSetting("dualwiki_fullpage") ~= nil then
+            G_reader_settings:delSetting("dualwiki_fullpage")
+        end
+    end
+    clear_fullpage()
+    dw:showResult("量子力学", {
+        { title = "量子力学", extract = "物理学分支。" },
+    }, "wikipedia", nil, "zh", true)
+    local w3 = shown[#shown]
+    if w3.results[1].is_wiki_fullpage == nil then
+        pass("F1 fullpage default OFF (no is_wiki_fullpage)")
+    else
+        fail("F1 fullpage default OFF", tostring(w3.results[1].is_wiki_fullpage))
+    end
+    G_reader_settings:saveSetting("dualwiki_fullpage", true)
+    dw:showResult("量子力学", {
+        { title = "量子力学", extract = "物理学分支。" },
+    }, "wikipedia", nil, "zh", true)
+    w3 = shown[#shown]
+    if w3.results[1].is_wiki_fullpage == true then
+        pass("F1 opt-in: wikipedia results carry is_wiki_fullpage")
+    else
+        fail("F1 opt-in wikipedia fullpage", tostring(w3.results[1].is_wiki_fullpage))
+    end
+    dw:showResult("初音未来", {
+        { title = "初音未来", extract = "虚拟歌手。" },
+    }, "moegirl", nil, "zh", true)
+    w3 = shown[#shown]
+    -- v1.3.5 (F1b): moegirl is now FULLPAGE-eligible (reading comfort);
+    -- its save button is stripped at layout build instead.
+    if w3.results[1].is_wiki_fullpage == true then
+        pass("F1b moegirl opt-in: results carry is_wiki_fullpage")
+    else
+        fail("F1b moegirl fullpage", tostring(w3.results[1].is_wiki_fullpage))
+    end
+    -- F1b save-strip contract: moegirl fullpage layout drops the "save"
+    -- button (core's EPUB path is a real-wiki-language one), keeps Close.
+    local layout = dw:_stripSaveFromFullpageLayout({
+        { { id = "save", text = "Save as EPUB" }, { id = "close", text = "Close" } },
+    })
+    local ids = {}
+    for _, row in ipairs(layout) do
+        for _, btn in ipairs(row) do ids[btn.id] = true end
+    end
+    if ids.save == nil and ids.close == true and #layout[1] == 1 then
+        pass("F1b save-strip: moegirl fullpage keeps Close, drops Save-as-EPUB")
+    else
+        fail("F1b save-strip", "ids=" .. tostring(layout[1][1] and layout[1][1].id))
+    end
+    -- F1b wikipedia layout untouched: the GATE (patched buildButtonLayout)
+    -- strips Save only for moegirl+fullpage windows. Install the patch with
+    -- a fixed orig layout and drive both engines through it. The stub class
+    -- returns itself for ANY missing index, so the idempotence flag must be
+    -- set to raw `false` — `nil` would fall through __index and read as
+    -- truthy, silently skipping the install.
+    local DQL = package.loaded["ui/widget/dictquicklookup"]
+    DQL.buildButtonLayout = function()
+        return { { { id = "save" }, { id = "close" } } }
+    end
+    DQL._dualwiki_fullpage_layout_patched = false
+    dw:_patchFullpageLayout()
+    local function built_for(engine)
+        return DQL.buildButtonLayout({
+            ui = { dual_wiki = dw },
+            dualwiki_engine = engine,
+            is_wiki_fullpage = true,
+        })
+    end
+    local wlayout = built_for("wikipedia")
+    local mlayout = built_for("moegirl")
+    if wlayout[1][1].id == "save" and wlayout[1][2].id == "close"
+        and #mlayout[1] == 1 and mlayout[1][1].id == "close" then
+        pass("F1b save-strip gate: wikipedia keeps Save, moegirl drops it")
+    else
+        fail("F1b save-strip gate",
+            "wiki_top=" .. tostring(wlayout[1][1].id)
+            .. " moegirl_n=" .. tostring(mlayout[1] and #mlayout[1]))
+    end
+    -- F1b engine-matched cache replay: a moegirl fullpage must NOT replay a
+    -- wikipedia cache round (same title lives on both sites).
+    dw._lookup_cache = {
+        ["wikipedia|zh|初音未来"] = {
+            cands = { { title = "初音未来", extract = "维基内容。", exact = true } },
+            is_full = true, at = os.time(), lang = "zh",
+        },
+        ["moegirl|zh|初音未来"] = {
+            cands = { { title = "初音未来", extract = "萌娘内容。", exact = true } },
+            is_full = true, at = os.time(), lang = "zh",
+        },
+    }
+    local mfetch = 0
+    dw.fetchDirect = function() mfetch = mfetch + 1; return nil end
+    dw:showFullpageResult("初音未来", "", "moegirl", "zh", nil)
+    dw.fetchDirect = nil
+    local w5 = shown[#shown]
+    if w5.results[1].is_wiki_fullpage == true and mfetch == 0
+        and tostring(w5.results[1].definition):find("萌娘内容", 1, true) then
+        pass("F1b engine-matched replay: moegirl fullpage uses moegirl cache")
+    else
+        fail("F1b engine-matched replay", "fetches=" .. mfetch
+            .. " def=" .. tostring(w5.results[1].definition))
+    end
+    dw:showResult("Mercury", {
+        { title = "Mercury (planet)", extract = "The closest planet.", dab_item = true },
+    }, "wikipedia", nil, "en", true)
+    w3 = shown[#shown]
+    if w3.results[1].is_wiki_fullpage == nil then
+        pass("F1 dab items excluded from fullpage")
+    else
+        fail("F1 dab fullpage leak", tostring(w3.results[1].is_wiki_fullpage))
+    end
+    -- F1 replay contract: fullscreen re-show from the session cache must
+    -- cost ZERO network (the definition is already full text from G2).
+    dw._lookup_cache = {
+        ["wikipedia|zh|量子力学"] = {
+            cands = { { title = "量子力学", extract = "全文正文，可直接归档。", exact = true } },
+            is_full = true, at = os.time(), lang = "zh",
+        },
+    }
+    local fetch_calls = 0
+    dw.fetchDirect = function() fetch_calls = fetch_calls + 1; return nil end
+    dw:showFullpageResult("量子力学", "", "wikipedia", "zh", nil)
+    local w4 = shown[#shown]
+    if w4.results[1].is_wiki_fullpage == true and fetch_calls == 0
+        and tostring(w4.results[1].definition):find("全文正文", 1, true) then
+        pass("F1 cache replay: fullscreen re-show costs zero network")
+    else
+        fail("F1 cache replay", "fetches=" .. fetch_calls
+            .. " fullpage=" .. tostring(w4.results[1].is_wiki_fullpage))
+    end
+    dw.fetchDirect = nil
+    clear_fullpage()
+    -- v1.3.5 (F2): takeover gate. Default: on. With dualwiki_no_takeover
+    -- set, _takeoverEnabled() must be false (native paths restored).
+    if dw:_takeoverEnabled() then
+        pass("F2 takeover default ON")
+    else
+        fail("F2 takeover default ON", "disabled without setting")
+    end
+    G_reader_settings:saveSetting("dualwiki_no_takeover", true)
+    if not dw:_takeoverEnabled() then
+        pass("F2 takeover OFF via dualwiki_no_takeover")
+    else
+        fail("F2 takeover OFF", "still enabled with setting")
+    end
+    -- F2 menu side: native entries preserved when takeover off, removed when on.
+    local mi = {
+        wikipedia_lookup = { text = "x" },
+        wikipedia_history = { text = "y" },
+        wikipedia_settings = { text = "z" },
+    }
+    dw:addToMainMenu(mi)
+    if mi.wikipedia_lookup and mi.wikipedia_history and mi.wikipedia_settings then
+        pass("F2 takeover OFF keeps native menu entries")
+    else
+        fail("F2 takeover OFF menus", "native entries removed")
+    end
+    G_reader_settings:delSetting("dualwiki_no_takeover")
+    dw:addToMainMenu(mi)
+    if mi.wikipedia_lookup == nil and mi.wikipedia_history == nil
+        and mi.wikipedia_settings == nil then
+        pass("F2 takeover ON removes native menu entries")
+    else
+        fail("F2 takeover ON menus", "native entries kept")
+    end
+    clear_fullpage()
     package.loaded["ui/widget/dictquicklookup"] = nil
     dw.ui = nil
 end

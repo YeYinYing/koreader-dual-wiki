@@ -2,83 +2,113 @@ msgid ""
 msgstr ""
 "Content-Type: text/plain; charset=UTF-8\nPlural-Forms: nplurals=1; plural=0;\n"
 
-msgid "Wikipedia (JA)"
-msgstr "維基百科（日文）"
-
-msgid "Wikipedia (EN)"
-msgstr "維基百科（英文）"
-
-msgid "Wikipedia (ZH)"
-msgstr "維基百科（中文）"
-
-msgid "Moegirlpedia"
-msgstr "萌娘百科"
-
-msgid "Fandom (%s)"
-msgstr "Fandom (%s)"
-
-msgid "Fandom"
-msgstr "Fandom"
-
-msgid "Moegirlpedia lookup"
-msgstr "萌娘百科查詢"
-
-msgid "Wikipedia lookup (Chinese)"
-msgstr "維基百科查詢（中文）"
-
-msgid "Wikipedia lookup (%1)"
-msgstr "維基百科查詢（%1）"
-
-msgid "Disambiguation entry"
-msgstr "消歧義項目"
-
-msgid "Did you mean: %1?"
-msgstr "您是不是要找：%1？"
-
-msgid "Try \"%1\""
-msgstr "試查「%1」"
-
-msgid "Wikipedia lookup (English)"
-msgstr "維基百科查詢（英文）"
-
-msgid "Wikipedia lookup (Japanese)"
-msgstr "維基百科查詢（日文）"
-
-msgid "Fandom lookup"
-msgstr "Fandom 查詢"
-
 msgid "Article lookup"
 msgstr "詞條查詢"
+
+msgid "Auto (detect from book)"
+msgstr "自動（跟隨書籍偵測）"
 
 msgid "Cancel"
 msgstr "取消"
 
-msgid "Search"
-msgstr "查詢"
+msgid "Candidate match."
+msgstr "（候選詞條。）"
 
-msgid "Candidate match. Tap the pencil icon at the top right to load the full article."
-msgstr "（候選詞條：點右上角鉛筆圖示載入本詞條完整正文。）"
+msgid "Chinese (ZH)"
+msgstr "中文 (ZH)"
 
-msgid "Querying"
-msgstr "正在查詢"
+msgid "Clear session lookup cache"
+msgstr "清除本次查詢快取"
+
+msgid "Cross-language article. Tap the pencil icon at the top right to load it."
+msgstr "跨語言詞條：點右上角鉛筆圖示直接載入。"
+
+msgid "Cross-language suggestions"
+msgstr "跨語言聯想（額外請求）"
+
+msgid "Did you mean: %1?"
+msgstr "您是不是要找：%1？"
+
+msgid "Disambiguation entry"
+msgstr "消歧義項目"
+
+msgid "Dual Wiki"
+msgstr "Dual Wiki"
+
+msgid "Dual Wiki settings"
+msgstr "Dual Wiki 設定"
+
+msgid "English (EN)"
+msgstr "英文 (EN)"
+
+msgid "French (FR)"
+msgstr "法文 (FR)"
+
+msgid "Full article"
+msgstr "全文閱讀"
+
+msgid "German (DE)"
+msgstr "德文 (DE)"
+
+msgid "Japanese (JA)"
+msgstr "日文 (JA)"
+
+msgid "Language lock (global default)"
+msgstr "語言鎖定（全域預設）"
+
+msgid "Language lock (global default) *"
+msgstr ""
+
+msgid "Language lock (this book)"
+msgstr "語言鎖定（本書）"
+
+msgid "Language lock (this book) *"
+msgstr ""
+
+msgid "Moegirlpedia"
+msgstr "萌娘百科"
+
+msgid "Moegirlpedia lookup"
+msgstr "萌娘百科查詢"
 
 msgid "Not found, modify and retry:"
 msgstr "未找到，可修改微調重試："
 
-msgid "Retry"
-msgstr "重新查詢"
+msgid "Open results fullscreen by default"
+msgstr "預設以全螢幕開啟結果"
 
-msgid "Switch to"
-msgstr "換查"
+msgid "Prewarm lookup on highlight"
+msgstr "高亮預熱查詢（連查更快）"
+
+msgid "Querying"
+msgstr "正在查詢"
 
 msgid "Rate limited by the wiki server. Wait a minute and retry."
 msgstr "已被百科伺服器限流，請稍候一分鐘再試。"
 
-msgid "The wiki server rejected the request."
-msgstr "百科伺服器拒絕了本次請求。"
+msgid "Retry"
+msgstr "重新查詢"
 
-msgid "The wiki server is having trouble. Retry later."
-msgstr "百科伺服器暫時故障，請稍後再試。"
+msgid "Russian (RU)"
+msgstr "俄文 (RU)"
+
+msgid "Search"
+msgstr "查詢"
+
+msgid "Session lookup cache cleared."
+msgstr "查詢快取已清除。"
+
+msgid "Spanish (ES)"
+msgstr "西班牙文 (ES)"
+
+msgid "Switch to"
+msgstr "換查"
+
+msgid "Take over native Wikipedia entry points"
+msgstr "接管原生 Wikipedia 按鈕與選單"
+
+msgid "The article is too large to display on this device."
+msgstr "該詞條過長，無法在本裝置上完整顯示。"
 
 msgid "The request timed out."
 msgstr "請求逾時。"
@@ -86,99 +116,35 @@ msgstr "請求逾時。"
 msgid "The site may be unreachable or blocked on this network."
 msgstr "該站點可能無法連線，或被目前網路攔截。"
 
-msgid "The article is too large to display on this device."
-msgstr "該詞條過長，無法在本裝置上完整顯示。"
+msgid "The wiki server is having trouble. Retry later."
+msgstr "百科伺服器暫時故障，請稍後再試。"
+
+msgid "The wiki server rejected the request."
+msgstr "百科伺服器拒絕了本次請求。"
+
+msgid "Try \"%1\""
+msgstr "試查「%1」"
+
+msgid "Wikipedia"
+msgstr "維基百科"
 
 msgid "Wikipedia (%s)"
 msgstr "維基百科 (%s)"
 
-msgid "Bilibili Game Wiki (%s)"
-msgstr "B站遊戲百科 (%s)"
+msgid "Wikipedia (EN)"
+msgstr "維基百科（英文）"
 
-msgid "Bilibili Game Wiki"
-msgstr "B站遊戲百科"
+msgid "Wikipedia (JA)"
+msgstr "維基百科（日文）"
 
-msgid "Wiktionary (JA)"
-msgstr "維基詞典 (日文)"
+msgid "Wikipedia (ZH)"
+msgstr "維基百科（中文）"
 
-msgid "Wiktionary (EN)"
-msgstr "維基詞典 (英文)"
+msgid "Wikipedia lookup (%1)"
+msgstr "維基百科查詢（%1）"
 
-msgid "Wiktionary"
-msgstr "維基詞典"
+msgid "Wikipedia lookup (English)"
+msgstr "維基百科查詢（英文）"
 
-msgid "Wiktionary lookup"
-msgstr "維基詞典查詢"
-
-msgid "Bilibili Game Wiki lookup"
-msgstr "B站遊戲百科查詢"
-
-msgid "Dual Wiki settings"
-msgstr "Dual Wiki 設定"
-
-msgid "Language lock (this book)"
-msgstr "語言鎖定（本書）"
-
-msgid "Language lock (global default)"
-msgstr "語言鎖定（全域預設）"
-
-msgid "Auto (detect from book)"
-msgstr "自動（跟隨書籍偵測）"
-
-msgid "Chinese (ZH)"
-msgstr "中文 (ZH)"
-
-msgid "English (EN)"
-msgstr "英文 (EN)"
-
-msgid "Japanese (JA)"
-msgstr "日文 (JA)"
-
-msgid "German (DE)"
-msgstr "德文 (DE)"
-
-msgid "French (FR)"
-msgstr "法文 (FR)"
-
-msgid "Spanish (ES)"
-msgstr "西班牙文 (ES)"
-
-msgid "Russian (RU)"
-msgstr "俄文 (RU)"
-
-msgid "Fandom community: %1"
-msgstr "Fandom 社群：%1"
-
-msgid "Bilibili game wiki: %1"
-msgstr "B站遊戲百科：%1"
-
-msgid "Clear session lookup cache"
-msgstr "清除本次查詢快取"
-
-msgid "Session lookup cache cleared."
-msgstr "查詢快取已清除。"
-
-msgid "Preferred engine (this book)"
-msgstr "首選引擎（本書）"
-
-msgid "Preferred engine (global default)"
-msgstr "首選引擎（全域預設）"
-
-msgid "Auto (book language plan)"
-msgstr "自動（依書籍語種排佈）"
-
-msgid "Prewarm lookup on highlight"
-msgstr "劃選時預載查詢"
-
-msgid "Cross-language article. Tap the pencil icon at the top right to load it."
-msgstr "跨語言詞條：點右上角鉛筆圖示直接載入。"
-
-msgid "Enter wiki subdomain"
-msgstr "輸入 wiki 子網域"
-
-msgid "e.g. %1"
-msgstr "例如：%1"
-
-msgid "Save"
-msgstr "儲存"
-
+msgid "Wikipedia lookup (Japanese)"
+msgstr "維基百科查詢（日文）"

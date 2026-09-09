@@ -10,7 +10,7 @@
 
 </div>
 
-Encyclopedia lookup plugin for KOReader e-ink readers. Supports Wikipedia (`zh` / `en` / `ja`), Moegirlpedia, and Fandom.
+Encyclopedia lookup plugin for KOReader e-ink readers. Supports Wikipedia (`zh` / `en` / `ja`, plus `de` / `fr` / `es` / `ru` surfaced automatically for books in those languages) and Moegirlpedia.
 
 ## Features
 
@@ -19,10 +19,11 @@ Encyclopedia lookup plugin for KOReader e-ink readers. Supports Wikipedia (`zh` 
 - Language-aware trailing-particle trimming; English strips possessive `'s` only, never plural `s`.
 - Word-boundary matching for Latin queries (`quantum` → `Quantum mechanics`, not `Wookieepedia` for `wo`).
 - Single-request candidate retrieval with summaries on the main path; pencil action upgrades to the full article.
-- Language-aware routing from KOReader book metadata, with a manual override in settings.
+- Language-aware routing from KOReader book metadata, with a manual override in settings; `de` / `fr` / `es` / `ru` only surface for books in those languages.
 - Japanese queries fall back to `ja.wikipedia` when Moegirlpedia results are unreliable.
 - `converttitles=1` is used only for Wikipedia Chinese queries.
-- Fandom full articles are retrieved via `action=parse`.
+- Opt-in features (default OFF, in settings): highlight prewarm lookup, cross-language suggestions, fullscreen result windows (`Full article` button + `dualwiki_fullpage`) for both Wikipedia and Moegirlpedia articles — moegirl fullpage windows omit the core `Save as EPUB` button (that path is wikipedia-only).
+- `Take over native Wikipedia entry points` toggle (default ON). Turn it off to restore KOReader's native Wikipedia menu entries and its own fullscreen + Save-as-EPUB channel.
 - gettext localization for `zh_CN`, `zh_TW`, and `ja`, loaded at startup from the active UI language.
 - Response bodies capped at 2 MB; explicit timeout reset; stale UI callbacks guarded.
 
@@ -38,9 +39,11 @@ koreader/
         ├── main.lua
         └── locale/
             ├── messages.pot
+            ├── en.po
             ├── ja.po
             ├── zh_CN.po
             ├── zh_TW.po
+            ├── en/LC_MESSAGES/dual_wiki.mo
             ├── ja/LC_MESSAGES/dual_wiki.mo
             ├── zh_CN/LC_MESSAGES/dual_wiki.mo
             └── zh_TW/LC_MESSAGES/dual_wiki.mo
