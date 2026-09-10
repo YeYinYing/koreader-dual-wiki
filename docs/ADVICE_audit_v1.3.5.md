@@ -26,20 +26,33 @@
 
 - 2MB body cap 在 sink 侧即时 abort；`socketutil:reset_timeout()` 成对调用；会话缓存 LRU 32，key=`engine|lang|word` 引擎隔离不串站 (F4b 初音未来)。
 
-## 10组划词矩阵回归 (P2-8)
+## 10组划词矩阵回归 (P2-8) — 2026-09-10 已执行，10/10 PASS
 
-| 序号 | 用例 | 期望 |
-|---|---|---|
-|1|《三体》|去书名号后 zh.wikipedia 三体|
-|2|“人工智能”|去引号后百科首条|
-|3|【凉宫春日的忧郁】|去括号后日文/中文命中|
-|4|量子力学的|去末尾助词 `的` 后仍命中|
-|5|拿破仑·波拿巴|中点保留，全名命中|
-|6|Re:从零开始|含冒号标题直达|
-|7|小笠原道|萌娘/维基分流正确|
-|8|Fate/stay night|斜杠保留|
-|9|魔戒(繁)|繁简 variant 分流|
-|10|黑神话|moegirl 首选|
+离线半场（`tests/test_query_helpers.lua` cases 1-10，`refactor/three-layer` 重跑）:
+`lua tests/test_query_helpers.lua dual_wiki.koplugin/helpers.lua` 与 legacy
+`.../main.lua` marker 路径均 `ALL TESTS PASSED`（10组 sanitation + ja/en 交叉 + G/L/N/V 全量）。
+
+在线半场（新增 `tests/test_matrix10.lua`，emu 运行时真网走真 `queryPipeline`，
+日志 `/tmp/matrix10_run2.log`，2026-09-10 11:50）:
+
+| 序号 | 用例 | 引擎/书语 | 实测 top | 结果 |
+|---|---|---|---|---|
+|1|《三体》|wikipedia zh|三体 (小说)|PASS|
+|2|“人工智能”|wikipedia zh|人工智能|PASS|
+|3|【凉宫春日的忧郁】|moegirl zh|凉宫春日的忧郁|PASS|
+|4|量子力学的|wikipedia zh|量子力学|PASS|
+|5|拿破仑·波拿巴|wikipedia zh|拿破仑一世|PASS|
+|6|Re:从零开始的异世界生活|wikipedia zh|Re:从零开始的异世界生活 虚假的王选候补|PASS|
+|7|小笠原道（少选一字 lenient）|wikipedia zh|小笠原道大|PASS|
+|8|Fate/stay night|wikipedia zh|Fate/Stay Night|PASS|
+|9|魔戒（书语 zh-Hant）|wikipedia zh + variant=zh-hant|魔戒|PASS|
+|10|黑神话|moegirl zh|黑神话：悟空|PASS|
+
+执行要点:
+- M9 用桩 `doc.getProps → { language = "zh-Hant" }` 驱动 `converttitles=1&variant=zh-hant` 服务端转换路径（审计项 3 的实证）。
+- M7 按契约宽松断言（少选一字允许前缀噪音），实测仍命中 `小笠原道大`。
+- 429 退避与 keepalive.clear 自愈逻辑与 L6/L4 同策略；本轮无 429 触发。
+- 运行方式: `cd emu/koreader && ./luajit tests/test_matrix10.lua`（exit 0 = 10/10）。
 
 > 真机/L6: L6 headless 26项已绿；真机 §F 14 项拟在 P2 收尾前复跑签字。
 
