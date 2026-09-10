@@ -1,5 +1,23 @@
 # Changelog
 
+## [1.4.0] - 2026-09-10 — golden-triangle + 16-group matrix, P3 green (Phase 2)
+
+### Changed — architecture
+
+- **Three-layer decoupling complete** (Phase 1 → Phase 2 anchor): `main.lua` 2399→1374 (UI only), `helpers.lua` 349 (pure functions, zero deps — single source of truth), `pipeline.lua` 548 (ENGINES / httpGet 2 MB cap + 429 backoff + keepalive pool / queryPipeline ladder), `keepalive.lua` 428 unchanged. `main.lua` consumes helpers via `local H = require("helpers")`; zero-loss Facade keeps `queryPipeline / fetchCandidates / fetchDirect / augmentLangLinks / _expandAllFullText / _httpGet / _keepalive` signatures 100% invariant.
+- **Golden-triangle routing** (P3-9): `per-book doc_settings dualwiki_lang_lock` > `global G_reader_settings dualwiki_lang` > `doc_props language → normalizeLang` > `default zh`; when unlocked and zh and selection is pure-script, `routeLangForScript` (pure kana→ja, pure Latin→en, pure Cyrillic→ru, mixed CJK→nil) routes before the first probe. Effective language is threaded through `queryPipeline → lookup → _last_effective_lang → window title / langlink bridge / LRU cache (engine|lang|word)`.
+
+### Added
+
+- **16-group cross-language matrix** (P3-10): `G1-G6 (golden-triangle) + M7-M16 (matrix)` = 16 groups, `tests/test_matrix16.lua` (17 checks — M14 splits wiki/moegirl into two PASS, logical 16). Covers `zh / zh-Hant(variant=zh-hant) / ja / en / de / moegirl × wikipedia / moegirl × dualwiki_{prewarm,langlink,fullpage}` three-switch collaboration. Online `emu runtime queryPipeline 17/17 PASS` (`/tmp/matrix16_run3.log` 2026-09-10 20:33, throttle 3s + `429→20s + keepalive.clear` self-heal, multi-top tolerance).
+- **Immersive fullpage + dual-engine takeover, verified headless**: `dualwiki_fullpage` (`is_wiki_fullpage` on `results[1]`, dab/langlink/no-extract excluded, moegirl `Save-as-EPUB` stripped via `_stripSaveFromFullpageLayout`), `dualwiki_langlink` (`augmentLangLinks` gated), `dualwiki_prewarm` (`highlight:addToHighlightDialog` 600ms debounce, `needs_expand` probe-only, negative TTL 180s). Headless contracts `M13/M14/M15` mirror `tests/test_l6_headless.lua F1/F1b`. Engine-matched replay: `engine|lang|word` LRU (M16), moegirl never replays wikipedia.
+- **Advice docs**: `docs/ADVICE_phase2_matrix16.md` (golden-triangle decision table + 16-group detail + live tops + rendering sync strategy) joins `docs/ADVICE_audit_v1.3.5.md` and `docs/ADVICE_three-layer_v1.4.0.md`.
+
+### Verified — release gate (all green on this anchor)
+
+- `luacheck 12 files 0 warnings / 0 errors` · `luac -p` 4 modules OK · `run_full_suite.sh --fast` L1/L2/L2b/L3/L5 ALL PASSED (smoke plugins=33) · `test_matrix16.lua 17/17` · `test_l6_headless 26 items` (ru transient 429 is Wikimedia flake, rerun green) · `§F 14 items` signed on Kindle PW3 1072×1448 @ 300DPI by Antigravity (`tests/MANUAL_CHECKLIST.md` commit `62a206e`).
+- Release ZIP ships 5 Lua modules (`_meta/main/helpers/pipeline/keepalive`) plus 4 bundled `.mo` locales; `PLUGIN_VERSION` / `USER_AGENT` follow `_meta.version` (CI `Verify tag matches plugin version` gate).
+
 ## [1.3.6] - 2026-09-10 — three-layer decoupling complete, P0-P2 green anchor
 
 ### Changed — architecture (v1.4.0 groundwork, frozen as a stable anchor)
