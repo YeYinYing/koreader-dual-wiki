@@ -74,7 +74,7 @@ local DualWiki = WidgetContainer:extend{
 -- Plugin directory (for locale loading), derived from this module's path.
 local PLUGIN_DIR = (debug.getinfo(1, "S").source or ""):match("^@?(.*)/[^/]*$") or ""
 
-local PLUGIN_VERSION = "1.3.6" -- luacheck: ignore 211
+local PLUGIN_VERSION = "1.4.0" -- luacheck: ignore 211
 local LF = string.char(10)
 
 
