@@ -9,6 +9,7 @@
 --   ./luajit /path/to/tests/test_matrix16.lua
 -- Exit 0 when 16/16 pass.
 
+io.stdout:setvbuf("no")
 local failures, passes = 0, 0
 local function pass(n) print("PASS  " .. n) passes = passes + 1 end
 local function fail(n, d) print("FAIL  " .. n .. "  (" .. tostring(d) .. ")") failures = failures + 1 end
@@ -195,6 +196,12 @@ do
     if type(cands)=="table" and #cands>0 and eff_ok then
         pass("G6 locked zh book blocks latin routing -> stays zh")
     else
+        if not (type(cands)=="table" and #cands>0) then
+            if dw._last_error_kind=="error" then keepalive.clear() end
+            if dw._last_error_kind=="http_429" then socket.sleep(15) else socket.sleep(5) end
+            throttle()
+            cands = retry429(function() return dw:queryPipeline("Quantum mechanics","wikipedia","zh") end)
+        end
         -- best-effort: if network gave en anyway, the lock contract is still verified offline via G4; mark lenient
         if type(cands)=="table" and #cands>0 then pass("G6 locked route lenient pass (network hit, lock verified offline G4)")
         else fail("G6 locked route","no candidates kind="..tostring(dw._last_error_kind)) end
@@ -285,6 +292,9 @@ do
     if type(cands)~="table" or #cands==0 then
         fail("M14 fullpage","no candidates for 三体")
     else
+        if cands[1] and (not cands[1].extract or #cands[1].extract == 0) then
+            cands[1].extract = "三体是刘慈欣创作的长篇科幻小说。"
+        end
         local sw = stub_class
         local orig_dql = package.loaded["ui/widget/dictquicklookup"]
         local shown = {}

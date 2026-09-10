@@ -85,7 +85,7 @@ do_smoke() {
   local code=$?
   set -e
   local loaded
-  loaded=$(rg -c "Plugin loaded dual_wiki" /tmp/ko_smoke.log || true)
+  loaded=$(grep -c "Plugin loaded dual_wiki" /tmp/ko_smoke.log || true)
   if [ "${loaded:-0}" -ge 1 ]; then
     echo "SMOKE OK: dual_wiki loaded (plugins=33 expected), exit=$code (124=timeout-boundary, expected)"
     exit 0
