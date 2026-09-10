@@ -37,7 +37,7 @@ do_deploy() {
 
 do_test() {
   echo "runtime: $("$LUAJIT" -v 2>&1 | head -1)"
-  "$LUAJIT" "$REPO_ROOT/tests/test_query_helpers.lua" "$PLUGIN_SRC/main.lua"
+  "$LUAJIT" "$REPO_ROOT/tests/test_query_helpers.lua" "$REPO_ROOT/dual_wiki.koplugin/helpers.lua"
 }
 
 do_integration() {

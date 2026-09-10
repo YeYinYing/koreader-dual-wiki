@@ -31,7 +31,7 @@ jobs:
           luac -p tests/test_query_helpers.lua
 
       - name: Unit tests (query helpers)
-        run: lua tests/test_query_helpers.lua dual_wiki.koplugin/main.lua
+        run: lua tests/test_query_helpers.lua dual_wiki.koplugin/helpers.lua
 
       - name: Locale sanity (mo files up to date)
         run: |

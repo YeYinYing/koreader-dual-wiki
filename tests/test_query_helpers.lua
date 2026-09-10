@@ -1,11 +1,12 @@
--- Unit tests: extract pure query helpers from main.lua and run the Plan A
--- matrix (zh) plus Phase 2.1 cross-language cases (ja/en), mishit guards,
+-- Unit tests: pure query helpers (single source of truth: helpers.lua) —
+-- Plan A matrix (zh), Phase 2.1 cross-language cases (ja/en), mishit guards,
 -- and the v1.3.0 Phase 2.2 language-map extension.
 --
--- Run:  lua tests/test_query_helpers.lua dual_wiki.koplugin/main.lua
--- (arg defaults to dual_wiki.koplugin/main.lua)
+-- Run:  lua tests/test_query_helpers.lua dual_wiki.koplugin/helpers.lua
+-- (arg defaults to dual_wiki.koplugin/helpers.lua; v1.4.0 removed the
+-- inline mirror from main.lua, so the legacy main.lua extraction path is gone)
 
-local src_path = arg and arg[1] or "dual_wiki.koplugin/main.lua"
+local src_path = arg and arg[1] or "dual_wiki.koplugin/helpers.lua"
 local f = io.open(src_path, "r")
 if not f then io.stderr:write("cannot open " .. src_path .. "\n") os.exit(1) end
 local src = f:read("*a")
