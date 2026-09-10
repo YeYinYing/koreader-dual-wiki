@@ -30,7 +30,7 @@ local LANG_MAP = H.LANG_MAP
 local LF = string.char(10)
 local MAX_RESPONSE_BYTES = 2 * 1024 * 1024
 -- luacheck: pop
-local PLUGIN_VERSION = "1.3.5"
+local PLUGIN_VERSION = "1.3.6"
 local USER_AGENT = "dual_wiki.koplugin/" .. PLUGIN_VERSION .. " (KOReader)"
 local MAX_CANDIDATES = 4
 local MAX_SEARCH_CANDIDATES = 8

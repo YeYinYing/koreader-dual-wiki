@@ -1,5 +1,39 @@
 # Changelog
 
+## [1.3.6] - 2026-09-10 — three-layer decoupling complete, P0-P2 green anchor
+
+### Changed — architecture (v1.4.0 groundwork, frozen as a stable anchor)
+
+- **Three-layer split of the 2399-line god file**: `main.lua` 2399→1374 (UI only),
+  `helpers.lua` 349 (pure functions, zero deps — single source of truth for the
+  former `query-helpers` block), `pipeline.lua` 548 (ENGINES / httpGet with
+  2 MB cap + 429 backoff + keepalive pool / fetchCandidates / fetchDirect /
+  fetchDisambiguationItems / expandDisambiguation / augmentLangLinks /
+  _expandAllFullText / queryPipeline), `keepalive.lua` 428 unchanged.
+  `main.lua` consumes helpers via `local H = require("helpers")`.
+- **Zero-loss facade**: `DualWiki.queryPipeline / fetchCandidates / fetchDirect /
+  fetchDisambiguationItems / expandDisambiguation / augmentLangLinks /
+  _expandAllFullText / fetchDirectAndShow` signatures 100% invariant;
+  `DualWiki._httpGet / _keepalive` re-export `pipeline.httpGet / pipeline.keepalive`.
+  The 1837-line automation suite passes unmodified.
+- `tests/test_query_helpers.lua` now defaults to `dual_wiki.koplugin/helpers.lua`
+  (the inline mirror in main.lua — and the legacy main.lua extraction path — is gone).
+- Defensive: `onShowKeyboard` calls are pcall-guarded so headless harnesses with
+  widget stubs no longer abort (real InputDialog unaffected).
+
+### Verified — release gate (all green on this anchor)
+
+- L1 luacheck 0 warnings / 0 errors · L2 helpers unit · L2b keepalive unit ·
+  L3 emulator smoke (plugin loads, plugins=33) · L4 real-network integration
+  ALL PASSED · L5 coexistence conflicts ALL PASSED · L6 headless 26 items ALL PASSED.
+- P2-8 10-group selection matrix 10/10 (offline helpers + online pipeline,
+  `tests/test_matrix10.lua`): 《三体》→三体 (小说) · “人工智能” · 【凉宫春日的忧郁】 ·
+  量子力学的→量子力学 · 拿破仑·波拿巴→拿破仑一世 · Re:从零… · 小笠原道→小笠原道大 ·
+  Fate/stay night→Fate/Stay Night · 魔戒 (book lang zh-Hant → variant=zh-hant) ·
+  黑神话→黑神话：悟空.
+- Release ZIP now ships 5 Lua modules (`_meta/main/helpers/pipeline/keepalive`)
+  plus the 4 bundled `.mo` locales.
+
 ## [1.3.5] - 2026-09-09 — slim build, immersive reading & native takeover
 
 ### Removed — slim build (user-directed scope reduction)
