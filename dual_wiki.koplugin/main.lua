@@ -613,8 +613,13 @@ function DualWiki:addToMainMenu(menu_items)
     -- toggle takes effect on the next menu open.
     if self:_takeoverEnabled() then
         menu_items.wikipedia_lookup = nil
-        menu_items.wikipedia_history = nil
         menu_items.wikipedia_settings = nil
+        menu_items.wikipedia_history = {
+            text = _("Wikipedia history"),
+            callback = function()
+                self:showHistoryDialog()
+            end,
+        }
     end
 
     -- "Dual Wiki" submenu: manual lookups + settings.
@@ -646,6 +651,12 @@ function DualWiki:addToMainMenu(menu_items)
             text = _("Wikipedia lookup (Japanese)"),
             callback = function()
                 self:showSearchDialog("wikipedia", nil, nil, "ja")
+            end,
+        },
+        {
+            text = _("Wikipedia history"),
+            callback = function()
+                self:showHistoryDialog()
             end,
         },
     }
@@ -828,6 +839,13 @@ function DualWiki:showSearchDialog(engine, initial_query, word_boxes, lang)
                     end,
                 },
                 {
+                    text = _("History"),
+                    callback = function()
+                        UIManager:close(input_dialog)
+                        self:showHistoryDialog(engine, word_boxes, lang)
+                    end,
+                },
+                {
                     text = _("Search"),
                     is_enter_default = true,
                     callback = function()
@@ -852,6 +870,120 @@ function DualWiki:showSearchDialog(engine, initial_query, word_boxes, lang)
     }
     UIManager:show(input_dialog)
     pcall(function() input_dialog:onShowKeyboard() end)
+end
+
+local function getHistoryStorage()
+    local ok_ds, DataStorage = pcall(require, "datastorage")
+    local ok_ld, LuaData = pcall(require, "luadata")
+    if ok_ds and ok_ld and DataStorage and LuaData then
+        local ok, storage = pcall(function()
+            return LuaData:open(DataStorage:getSettingsDir() .. "/wikipedia_history.lua", "WikipediaHistory")
+        end)
+        if ok and storage then return storage end
+    end
+    return nil
+end
+
+function DualWiki:_recordHistory(word, engine, lang)
+    if not word or strTrim(word) == "" then return end
+    word = strTrim(word)
+    local storage = getHistoryStorage()
+    local book_title = (self.ui and self.ui.doc_props and self.ui.doc_props.display_title) or _("Wikipedia lookup")
+    local entry = {
+        book_title = book_title,
+        time = os.time(),
+        word = word,
+        engine = engine or "wikipedia",
+        lang = (lang or "zh"):lower(),
+    }
+    if storage then
+        pcall(function()
+            storage:addTableItem("wikipedia_history", entry)
+            local hist = storage:readSetting("wikipedia_history")
+            if type(hist) == "table" and #hist > 50 then
+                while #hist > 50 do
+                    table.remove(hist, 1)
+                end
+                storage:saveSetting("wikipedia_history", hist)
+            end
+            storage:flush()
+        end)
+    end
+    if not self._history_list then self._history_list = {} end
+    table.insert(self._history_list, 1, entry)
+    if #self._history_list > 50 then
+        table.remove(self._history_list)
+    end
+end
+
+function DualWiki:showHistoryDialog(engine, word_boxes, lang)
+    local storage = getHistoryStorage()
+    local hist_table = {}
+    if storage and storage:has("wikipedia_history") then
+        local read_tbl = storage:readSetting("wikipedia_history")
+        if type(read_tbl) == "table" then hist_table = read_tbl end
+    elseif self._history_list then
+        hist_table = self._history_list
+    end
+
+    if #hist_table == 0 then
+        UIManager:show(InfoMessage:new{
+            text = _("No Wikipedia search history yet."),
+            timeout = 2,
+        })
+        return
+    end
+
+    local KeyValuePage
+    local ok_kv, kv_mod = pcall(require, "ui/widget/keyvaluepage")
+    if ok_kv and kv_mod then KeyValuePage = kv_mod end
+
+    local kv_pairs = {}
+    local previous_title
+    for i = #hist_table, 1, -1 do
+        local value = hist_table[i]
+        if value and value.word then
+            if value.book_title and value.book_title ~= previous_title then
+                table.insert(kv_pairs, { value.book_title .. ":", "" })
+                previous_title = value.book_title
+            end
+            local eng_badge = (value.engine == "moegirl") and "萌 " or "维 "
+            local lang_badge = value.lang and (" [" .. value.lang:upper() .. "]") or ""
+            local display_text = eng_badge .. value.word .. lang_badge
+            local time_str = value.time and os.date("%Y-%m-%d %H:%M", value.time) or ""
+            table.insert(kv_pairs, {
+                time_str,
+                display_text,
+                callback = function()
+                    self:lookup(value.word, value.engine or engine or "wikipedia", word_boxes, value.lang or lang)
+                end,
+            })
+        end
+    end
+
+    if KeyValuePage then
+        UIManager:show(KeyValuePage:new{
+            title = _("Wikipedia history"),
+            value_overflow_align = "right",
+            kv_pairs = kv_pairs,
+        })
+    else
+        local Menu = require("ui/widget/menu")
+        local item_table = {}
+        for _, pair in ipairs(kv_pairs) do
+            if pair.callback then
+                table.insert(item_table, {
+                    text = pair[2],
+                    mandatory = pair[1],
+                    callback = pair.callback,
+                })
+            end
+        end
+        UIManager:show(Menu:new{
+            title = _("Wikipedia history"),
+            item_table = item_table,
+        })
+    end
 end
 
 -- Merged probe request: one HTTP round-trip returns up to MAX_CANDIDATES
@@ -1042,6 +1174,7 @@ function DualWiki:showResult(word, cands, engine, word_boxes, lang, is_full, for
     if not cfg then return end
     local dict_name = cfg.label(lang)
     local result_lang = lang or "zh"
+    self:_recordHistory(word, engine, result_lang)
     -- v1.3.5 (F1/F1b): immersive large-window reading, a
     -- first-class Dual Wiki feature now that G2 already carries full
     -- article text. wikipedia AND moegirl qualify. The fullpage window's
